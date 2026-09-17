@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tradehub
+      POSTGRES_USER: tradehub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+    volumes:
+      - tradehub-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradehub -d tradehub"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tradehub_internal
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://tradehub:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/tradehub
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8787:8787"
+    networks:
+      - tradehub_internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  tradehub_internal:
+    driver: bridge
+
+volumes:
+  tradehub-db:
