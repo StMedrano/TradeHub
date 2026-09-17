@@ -1,0 +1,34 @@
+from enum import StrEnum
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class TradingMode(StrEnum):
+    DRY_RUN = "dry_run"
+    LIVE = "live"
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_env: str = "production"
+    app_name: str = "TradeHub"
+    database_url: str = "sqlite:///./tradehub.db"
+
+    trading_mode: TradingMode = TradingMode.DRY_RUN
+    phase: int = Field(default=0, ge=0, le=2)
+    require_approval: bool = True
+    max_concurrent_positions: int = Field(default=1, ge=1)
+
+    max_trade_loss_pct: float = Field(default=0.05, gt=0, le=1)
+    max_portfolio_loss_pct: float = Field(default=0.20, gt=0, le=1)
+    daily_loss_breaker_pct: float = Field(default=0.10, gt=0, le=1)
+
+    liquidity_max_spread_pct: float = Field(default=0.12, gt=0, le=1)
+    entry_timeout_seconds: int = Field(default=90, ge=1)
+    price_walk_increment: float = Field(default=0.01, gt=0)
+    max_slippage_pct: float = Field(default=0.08, ge=0, le=1)
+
+    robinhood_mcp_url: str = "https://agent.robinhood.com/mcp/trading"
+    robinhood_mcp_enabled: bool = False
+    alert_provider: str = "disabled"
+
+settings = Settings()
