@@ -63,3 +63,34 @@ Implemented:
 - GitHub Actions tests
 
 Live order placement remains disabled by default.
+
+## Dashboard UI
+
+TradeHub now ships a React 19 + Vite + Radix Themes frontend that is compiled into
+the production Docker image and served by FastAPI.
+
+The dashboard includes:
+
+- Preview-matched dark Robinhood-style layout
+- Sidebar navigation
+- Account metric cards
+- Risk utilization and hard-limit cards
+- Position overview
+- Trade opportunity workspace
+- Approval queue with approve/reject dialog
+- Browser approval notifications
+- Assignment/expiration hold acknowledgement
+- Activity/audit table
+- Robinhood MCP / rollout mode status
+- Responsive tablet/mobile layout
+
+When Robinhood MCP read access is disabled, brokerage account-value fields display
+as unavailable instead of using fake production data.
+
+To apply UI updates on an existing server:
+
+```bash
+cd /opt/TradeHub
+git pull
+docker compose up -d --build
+```
