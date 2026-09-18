@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import ApprovalAction, PauseAck, RiskCheckRequest
+from app.api.schemas import ApprovalAction, CandidatePromotionRequest, PauseAck, RiskCheckRequest
 from app.config import settings
 from app.db import SessionLocal
-from app.domain.models import AccountRiskSnapshot, RiskPolicy, TradeIntent
-from app.persistence.models import AuditEvent, TradeProposal, UnderlyingPause
+from app.domain.models import AccountRiskSnapshot, RiskPolicy, StrategyType, TradeIntent
+from app.persistence.models import AuditEvent, TradeProposal, TradeProposalDetail, UnderlyingPause
 from app.risk.manager import RiskManager
+from app.risk.state import portfolio_risk_state_service
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.read_service import robinhood_read_service
 from app.robinhood.market_data import robinhood_market_data
@@ -226,8 +227,12 @@ def dashboard_summary(db: Session = Depends(db_session)):
         "buying_power": snapshot.buying_power,
         "cash": snapshot.cash,
         "options_value": snapshot.options_value,
-        "daily_pnl": None,
-        "daily_pnl_pct": None,
+        "daily_pnl": snapshot.realized_pnl_today,
+        "daily_pnl_pct": (
+            (snapshot.realized_pnl_today / snapshot.equity * 100)
+            if snapshot.realized_pnl_today is not None and snapshot.equity
+            else None
+        ),
         "total_pnl": None,
         "open_risk": None,
         "risk_utilization_pct": None,
@@ -444,4 +449,152 @@ async def phase_one_candidates(symbol: str):
             "required hard gate before approval-ready proposals are allowed."
         ),
         "tool_errors": scan.tool_errors,
+    }
+
+
+
+@router.post("/opportunities/promote")
+async def promote_phase_one_candidate(
+    body: CandidatePromotionRequest,
+    db: Session = Depends(db_session),
+):
+    """Re-scan and promote one CSP candidate through authoritative server-side risk.
+
+    Covered-call promotion remains disabled until whole-position stock cost-basis
+    semantics are implemented. This endpoint never calls a Robinhood write tool.
+    """
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(409, "Robinhood MCP is disabled.")
+
+    symbol = body.symbol.strip().upper()
+    candidate_key = f"{symbol}:{body.option_id}"
+
+    existing = db.scalar(
+        select(TradeProposalDetail).where(
+            TradeProposalDetail.candidate_key == candidate_key
+        )
+    )
+    if existing:
+        raise HTTPException(
+            409,
+            "This Robinhood option candidate has already been promoted.",
+        )
+
+    risk_state = portfolio_risk_state_service.build(
+        db,
+        robinhood_read_service.snapshot,
+    )
+    if not risk_state.authoritative or risk_state.snapshot is None:
+        raise HTTPException(
+            409,
+            {
+                "message": "Authoritative portfolio risk state is not available.",
+                "reasons": list(risk_state.reasons),
+            },
+        )
+
+    try:
+        scan = await robinhood_market_data.scan_symbol(symbol)
+        candidates = phase_one_candidate_engine.generate(
+            scan,
+            robinhood_read_service.snapshot,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            502,
+            f"Robinhood candidate refresh failed: {exc}",
+        ) from exc
+
+    candidate = next(
+        (item for item in candidates if item.option_id == body.option_id),
+        None,
+    )
+    if candidate is None:
+        raise HTTPException(
+            409,
+            "Candidate no longer passes the current market-data filters.",
+        )
+
+    if candidate.strategy != "cash_secured_put":
+        raise HTTPException(
+            409,
+            "Covered-call promotion is held until whole-position stock risk is authoritative.",
+        )
+
+    if candidate.buying_power_sufficient is not True:
+        raise HTTPException(
+            409,
+            "Synchronized buying power is insufficient or unavailable.",
+        )
+
+    if candidate.estimated_max_loss is None:
+        raise HTTPException(409, "Candidate max loss is unavailable.")
+
+    intent = TradeIntent(
+        strategy=StrategyType.CASH_SECURED_PUT,
+        underlying=symbol,
+        contracts=candidate.contracts,
+        known_max_loss=candidate.estimated_max_loss,
+        shares_held=candidate.shares_held,
+        has_short_put=True,
+        is_defined_risk=True,
+    )
+    result = risk_manager.evaluate(
+        intent,
+        risk_state.snapshot,
+        current_policy(),
+    )
+    status = "pending_approval" if result.approved else "rejected"
+
+    db.add(
+        TradeProposal(
+            id=intent.id,
+            underlying=intent.underlying,
+            strategy=intent.strategy.value,
+            contracts=intent.contracts,
+            known_max_loss=float(intent.known_max_loss),
+            status=status,
+            risk_reasons="\n".join(result.reasons),
+        )
+    )
+    db.add(
+        TradeProposalDetail(
+            proposal_id=intent.id,
+            candidate_key=candidate_key,
+            option_id=body.option_id,
+            candidate_json=json.dumps(candidate.as_dict()),
+        )
+    )
+    db.add(
+        AuditEvent(
+            event_type="candidate_promoted",
+            severity="info" if result.approved else "warning",
+            underlying=symbol,
+            message=(
+                f"CSP candidate {body.option_id} promoted: "
+                f"{'PASS' if result.approved else 'REJECT'}"
+            ),
+            payload_json=json.dumps(
+                {
+                    "proposal_id": intent.id,
+                    "candidate": candidate.as_dict(),
+                    "risk_reasons": list(result.reasons),
+                    "trade_limit": str(result.trade_limit),
+                    "portfolio_limit": str(result.portfolio_limit),
+                    "daily_loss_limit": str(result.daily_loss_limit),
+                }
+            ),
+        )
+    )
+    db.commit()
+
+    return {
+        "proposal_id": intent.id,
+        "status": status,
+        "approved_by_risk": result.approved,
+        "risk_reasons": list(result.reasons),
+        "execution_enabled": False,
+        "trading_mode": settings.trading_mode.value,
     }
