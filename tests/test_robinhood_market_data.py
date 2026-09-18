@@ -49,3 +49,64 @@ def test_option_ids_accepts_common_robinhood_id_shapes():
     }
 
     assert RobinhoodMarketDataService._option_ids(payload) == ["a", "b", "c"]
+
+
+
+def test_normalize_contracts_unwraps_quote_wrapper():
+    instruments = {
+        "data": {
+            "instruments": [
+                {
+                    "id": "opt-1",
+                    "chain_symbol": "SPY",
+                    "expiration_date": "2026-10-16",
+                    "strike_price": "500",
+                    "type": "put",
+                    "trade_value_multiplier": "100",
+                }
+            ]
+        }
+    }
+    quotes = {
+        "data": {
+            "results": [
+                {
+                    "quote": {
+                        "instrument_id": "opt-1",
+                        "bid_price": "4.80",
+                        "ask_price": "5.20",
+                        "implied_volatility": "0.22",
+                        "delta": "-0.24",
+                        "theta": "-0.05",
+                        "open_interest": 850,
+                        "volume": 120,
+                    }
+                }
+            ]
+        }
+    }
+
+    rows = RobinhoodMarketDataService._normalize_contracts(instruments, quotes)
+    assert len(rows) == 1
+    assert rows[0]["bid"] == 4.8
+    assert rows[0]["ask"] == 5.2
+    assert rows[0]["delta"] == -0.24
+    assert rows[0]["open_interest"] == 850
+    assert rows[0]["volume"] == 120
+
+
+def test_chain_and_instrument_arrays_are_counted_directly():
+    from app.robinhood.normalize import extract_records
+
+    chains = {"data": {"chains": [{"id": "chain-1", "symbol": "SPY"}]}}
+    instruments = {
+        "data": {
+            "instruments": [
+                {"id": "a", "chain_symbol": "SPY"},
+                {"id": "b", "chain_symbol": "SPY"},
+            ]
+        }
+    }
+
+    assert len(extract_records(chains)) == 1
+    assert len(extract_records(instruments)) == 2
