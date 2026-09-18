@@ -47,8 +47,12 @@ def build_arguments(schema: dict[str, Any], context: dict[str, Any]) -> dict[str
         if value is None:
             continue
 
-        if isinstance(spec, dict) and spec.get("type") == "array" and not isinstance(value, list):
-            value = [value]
+        if isinstance(spec, dict):
+            field_type = spec.get("type")
+            if field_type == "array" and not isinstance(value, list):
+                value = [value]
+            elif field_type == "string" and isinstance(value, list):
+                value = ",".join(str(item) for item in value)
 
         args[field] = value
 
