@@ -117,10 +117,20 @@ function MetricCard({ label, value, detail, connected, tone = "neutral" }) {
 
 function StatusPill({ summary }) {
   const mode = summary?.trading_mode === "live" ? "LIVE" : "DRY RUN";
-  const connection = summary?.robinhood_mcp_enabled ? "Robinhood MCP configured" : "Robinhood MCP disabled";
+  const connectionState = summary?.robinhood_connection_state || (summary?.robinhood_mcp_enabled ? "configured" : "disabled");
+  const connectionLabels = {
+    connected: "Robinhood Connected",
+    degraded: "Robinhood Degraded",
+    authentication_required: "Robinhood Auth Required",
+    error: "Robinhood Error",
+    configured: "Robinhood MCP Configured",
+    disabled: "Robinhood MCP Disabled"
+  };
+  const connection = connectionLabels[connectionState] || connectionState;
+  const connectionColor = connectionState === "connected" ? "green" : connectionState === "disabled" ? "gray" : "amber";
   return (
     <Flex align="center" gap="2" wrap="wrap">
-      <Badge color={summary?.robinhood_mcp_enabled ? "green" : "gray"} variant="soft" radius="full">
+      <Badge color={connectionColor} variant="soft" radius="full">
         <DotFilledIcon /> {connection}
       </Badge>
       <Badge color={summary?.trading_mode === "live" ? "red" : "amber"} variant="soft" radius="full">
@@ -280,8 +290,8 @@ function PositionPanel({ summary }) {
           <Heading size="4">Position Overview</Heading>
           <Text size="2" color="gray">Robinhood Agentic account exposure</Text>
         </Box>
-        <Badge variant="soft" color={summary?.robinhood_mcp_enabled ? "green" : "gray"}>
-          {summary?.robinhood_mcp_enabled ? "Configured" : "Awaiting connection"}
+        <Badge variant="soft" color={summary?.robinhood_connection_state === "connected" ? "green" : "gray"}>
+          {summary?.robinhood_connection_state === "connected" ? "Live read sync" : "Awaiting connection"}
         </Badge>
       </Flex>
 
@@ -467,8 +477,8 @@ export default function App() {
   const subtitle = SECTION_COPY[section][1];
 
   const metrics = useMemo(() => ([
-    ["Total Equity", money(summary?.equity), summary?.robinhood_mcp_enabled ? "Robinhood Agentic" : "Connect Robinhood to populate"],
-    ["Buying Power", money(summary?.buying_power), summary?.robinhood_mcp_enabled ? "Available capital" : "Awaiting account sync"],
+    ["Total Equity", money(summary?.equity), summary?.robinhood_connection_state === "connected" ? "Robinhood Agentic" : "Connect Robinhood to populate"],
+    ["Buying Power", money(summary?.buying_power), summary?.robinhood_connection_state === "connected" ? "Available capital" : "Awaiting account sync"],
     ["Today's P&L", money(summary?.daily_pnl), summary?.daily_pnl_pct == null ? "No synced P&L yet" : pct(summary.daily_pnl_pct), summary?.daily_pnl > 0 ? "positive" : summary?.daily_pnl < 0 ? "negative" : "neutral"],
     ["Total P&L", money(summary?.total_pnl), "Tracked positions", summary?.total_pnl > 0 ? "positive" : summary?.total_pnl < 0 ? "negative" : "neutral"]
   ]), [summary]);
@@ -528,7 +538,7 @@ export default function App() {
                 value={value}
                 detail={detail}
                 tone={tone}
-                connected={Boolean(summary?.robinhood_mcp_enabled)}
+                connected={summary?.robinhood_connection_state === "connected"}
               />
             ))}
           </Grid>
@@ -660,9 +670,12 @@ export default function App() {
               <Flex justify="between"><Text color="gray">MCP endpoint</Text><Text>agent.robinhood.com</Text></Flex>
               <Separator size="4" />
               <Flex justify="between"><Text color="gray">MCP enabled</Text><Badge color={summary?.robinhood_mcp_enabled ? "green" : "gray"}>{summary?.robinhood_mcp_enabled ? "Yes" : "No"}</Badge></Flex>
+              <Flex justify="between"><Text color="gray">Connection</Text><Badge color={summary?.robinhood_connection_state === "connected" ? "green" : "amber"}>{summary?.robinhood_connection_state || "disabled"}</Badge></Flex>
+              <Flex justify="between"><Text color="gray">Last sync</Text><Text>{formatDate(summary?.robinhood_last_sync)}</Text></Flex>
               <Flex justify="between"><Text color="gray">Trading mode</Text><Badge color={summary?.trading_mode === "live" ? "red" : "amber"}>{summary?.trading_mode === "live" ? "LIVE" : "DRY RUN"}</Badge></Flex>
               <Flex justify="between"><Text color="gray">Rollout phase</Text><Text>{summary?.phase ?? 0}</Text></Flex>
               <Flex justify="between"><Text color="gray">Approval required</Text><Text>{summary?.require_approval ? "Yes" : "No"}</Text></Flex>
+              {summary?.robinhood_last_error ? <Callout.Root color="amber"><Callout.Text>{summary.robinhood_last_error}</Callout.Text></Callout.Root> : null}
             </Flex>
           </Card>
           <Card className="large-card">
