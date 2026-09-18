@@ -7,12 +7,29 @@ on:
     branches: [main]
 
 jobs:
-  pytest:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build Radix frontend
+        working-directory: frontend
+        run: npm run build
+
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: pytest -q
+
+      - name: Install backend dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run backend tests
+        run: pytest -q
