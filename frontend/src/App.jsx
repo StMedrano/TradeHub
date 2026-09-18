@@ -723,14 +723,22 @@ export default function App() {
               ) : null}
 
               <Card className="large-card">
-                <Flex justify="between" align="center" mb="4">
+                <Flex justify="between" align="center" mb="4" gap="3" wrap="wrap">
                   <Box>
                     <Heading size="4">Phase 1 Candidates</Heading>
                     <Text size="2" color="gray">
                       Mechanical covered-call/CSP screening only. Candidates are not approval-ready trades.
                     </Text>
                   </Box>
-                  <Badge color="amber" variant="soft">PORTFOLIO RISK PENDING</Badge>
+                  <Flex gap="2" wrap="wrap">
+                    {candidateResult ? (
+                      <>
+                        <Badge color="green" variant="soft">{candidateResult.passed_contracts} passed</Badge>
+                        <Badge color="gray" variant="soft">{candidateResult.rejected_contracts} filtered</Badge>
+                      </>
+                    ) : null}
+                    <Badge color="amber" variant="soft">PORTFOLIO RISK PENDING</Badge>
+                  </Flex>
                 </Flex>
 
                 {candidateResult?.candidates?.length ? (
@@ -794,6 +802,27 @@ export default function App() {
                     <Callout.Text>{candidateResult.note}</Callout.Text>
                   </Callout.Root>
                 ) : null}
+                {candidateResult?.diagnostics?.some((item) => !item.passed) ? (
+                  <Box mt="4">
+                    <Text size="2" weight="bold">Filter diagnostics</Text>
+                    <Flex direction="column" gap="2" mt="2">
+                      {candidateResult.diagnostics
+                        .filter((item) => !item.passed)
+                        .slice(0, 12)
+                        .map((item, index) => (
+                          <Flex key={(item.option_id || "diag") + index} gap="2" align="start">
+                            <Badge color="gray" variant="soft">
+                              {(item.option_type || "option") + " " + (item.strike_price || "—")}
+                            </Badge>
+                            <Text size="1" color="gray">
+                              {item.reasons.join(" · ")}
+                            </Text>
+                          </Flex>
+                        ))}
+                    </Flex>
+                  </Box>
+                ) : null}
+
               </Card>
 
               <Card className="large-card">
