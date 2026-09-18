@@ -6,7 +6,7 @@ from typing import Any
 
 from app.config import settings
 from app.robinhood.client import RobinhoodAuthRequired, RobinhoodTradingMCP
-from app.robinhood.normalize import count_records, extract_records, find_first_list, find_first_number
+from app.robinhood.normalize import count_records, extract_records, find_first_list, find_first_number, is_effectively_empty
 from app.robinhood.schema_args import build_arguments
 
 
@@ -166,10 +166,19 @@ class RobinhoodReadService:
                         "realized_pl",
                         "total_realized_pnl",
                         "realized_profit_loss",
+                        "net_realized_pnl",
+                        "pnl",
+                        "profit_loss",
                         "amount",
+                        "total",
                     ),
                 )
-                realized_pnl_authoritative = realized_pnl is not None
+                if realized_pnl is not None:
+                    realized_pnl_authoritative = True
+                elif is_effectively_empty(realized_payload):
+                    # A successful empty same-day query means no realized P&L yet today.
+                    realized_pnl = 0.0
+                    realized_pnl_authoritative = True
         except Exception as exc:
             tool_errors["get_realized_pnl"] = str(exc)
 
