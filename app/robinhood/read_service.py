@@ -5,7 +5,7 @@ from typing import Any
 
 from app.config import settings
 from app.robinhood.client import RobinhoodAuthRequired, RobinhoodTradingMCP
-from app.robinhood.normalize import count_records, find_first_list, find_first_number
+from app.robinhood.normalize import count_records, extract_records, find_first_list, find_first_number
 
 
 OPEN_ORDER_STATES = {"queued", "confirmed", "partially_filled", "pending", "open"}
@@ -26,6 +26,8 @@ class RobinhoodSnapshot:
     open_option_positions: int = 0
     open_orders: int = 0
     raw_portfolio: Any = None
+    equity_positions: list[dict[str, Any]] = field(default_factory=list)
+    option_positions: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def open_positions(self) -> int:
@@ -164,6 +166,8 @@ class RobinhoodReadService:
             open_option_positions=count_records(options),
             open_orders=self._open_order_count(option_orders),
             raw_portfolio=portfolio,
+            equity_positions=extract_records(equities),
+            option_positions=extract_records(options),
         )
         return self.snapshot
 
