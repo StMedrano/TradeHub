@@ -303,6 +303,7 @@ def robinhood_status():
         "open_orders": snapshot.open_orders,
         "realized_pnl_today": snapshot.realized_pnl_today,
         "realized_pnl_authoritative": snapshot.realized_pnl_authoritative,
+        "realized_pnl_shape": snapshot.realized_pnl_shape,
     }
 
 
