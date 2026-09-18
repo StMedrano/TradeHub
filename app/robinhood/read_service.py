@@ -1,11 +1,13 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from app.config import settings
 from app.robinhood.client import RobinhoodAuthRequired, RobinhoodTradingMCP
 from app.robinhood.normalize import count_records, extract_records, find_first_list, find_first_number
+from app.robinhood.schema_args import build_arguments
 
 
 OPEN_ORDER_STATES = {"queued", "confirmed", "partially_filled", "pending", "open"}
@@ -22,6 +24,8 @@ class RobinhoodSnapshot:
     buying_power: float | None = None
     cash: float | None = None
     options_value: float | None = None
+    realized_pnl_today: float | None = None
+    realized_pnl_authoritative: bool = False
     open_equity_positions: int = 0
     open_option_positions: int = 0
     open_orders: int = 0
@@ -139,6 +143,36 @@ class RobinhoodReadService:
         options = await read_tool("get_option_positions")
         option_orders = await read_tool("get_option_orders")
 
+        realized_pnl = None
+        realized_pnl_authoritative = False
+        try:
+            catalog = await self.client.tool_catalog()
+            tool = catalog.get("get_realized_pnl")
+            if tool:
+                today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+                pnl_args = build_arguments(
+                    tool.get("input_schema") or {},
+                    {
+                        "account_number": account_number,
+                        "start_date": today,
+                        "end_date": today,
+                    },
+                )
+                realized_payload = await self.client.call("get_realized_pnl", pnl_args)
+                realized_pnl = find_first_number(
+                    realized_payload,
+                    (
+                        "realized_pnl",
+                        "realized_pl",
+                        "total_realized_pnl",
+                        "realized_profit_loss",
+                        "amount",
+                    ),
+                )
+                realized_pnl_authoritative = realized_pnl is not None
+        except Exception as exc:
+            tool_errors["get_realized_pnl"] = str(exc)
+
         equity = find_first_number(
             portfolio,
             ("total_value", "equity_value", "portfolio_value", "equity"),
@@ -162,6 +196,8 @@ class RobinhoodReadService:
             buying_power=buying_power,
             cash=cash,
             options_value=options_value,
+            realized_pnl_today=realized_pnl,
+            realized_pnl_authoritative=realized_pnl_authoritative,
             open_equity_positions=count_records(equities),
             open_option_positions=count_records(options),
             open_orders=self._open_order_count(option_orders),
