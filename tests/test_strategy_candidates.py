@@ -116,3 +116,37 @@ def test_liquidity_filter_removes_wide_spread():
     )
 
     assert rows == []
+
+
+
+def test_diagnostics_explain_filtered_contract():
+    snapshot = RobinhoodSnapshot(
+        connection_state="connected",
+        buying_power=50000,
+        equity_positions=[],
+    )
+
+    diagnostics = PhaseOneCandidateEngine().diagnose(
+        scan(contract(option_type="put", spread_pct=30.0)),
+        snapshot,
+    )
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0].passed is False
+    assert any("Spread" in reason for reason in diagnostics[0].reasons)
+
+
+def test_diagnostics_explain_covered_call_share_requirement():
+    snapshot = RobinhoodSnapshot(
+        connection_state="connected",
+        buying_power=50000,
+        equity_positions=[],
+    )
+
+    diagnostics = PhaseOneCandidateEngine().diagnose(
+        scan(contract(option_type="call")),
+        snapshot,
+    )
+
+    assert diagnostics[0].passed is False
+    assert any("100 owned shares" in reason for reason in diagnostics[0].reasons)
