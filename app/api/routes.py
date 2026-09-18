@@ -13,6 +13,7 @@ from app.risk.manager import RiskManager
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.read_service import robinhood_read_service
 from app.robinhood.market_data import robinhood_market_data
+from app.strategy.candidates import phase_one_candidate_engine
 
 router = APIRouter(prefix="/api")
 risk_manager = RiskManager()
@@ -383,4 +384,57 @@ async def scan_option_opportunities(symbol: str):
         "tool_errors": result.tool_errors,
         "execution_enabled": False,
         "informational_only": True,
+    }
+
+
+
+@router.get("/opportunities/candidates")
+async def phase_one_candidates(symbol: str):
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(409, "Robinhood MCP is disabled.")
+    if robinhood_read_service.snapshot.connection_state not in {
+        "connected",
+        "degraded",
+    }:
+        raise HTTPException(
+            409,
+            "Robinhood read connection is not ready. Complete OAuth and sync first.",
+        )
+
+    try:
+        scan = await robinhood_market_data.scan_symbol(symbol)
+        candidates = phase_one_candidate_engine.generate(
+            scan,
+            robinhood_read_service.snapshot,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            502,
+            f"Robinhood strategy scan failed: {exc}",
+        ) from exc
+
+    return {
+        "symbol": scan.symbol,
+        "scanned_at": scan.scanned_at,
+        "candidates": [candidate.as_dict() for candidate in candidates],
+        "filters": {
+            "min_open_interest": settings.strategy_min_open_interest,
+            "min_volume": settings.strategy_min_volume,
+            "min_dte": settings.strategy_min_dte,
+            "max_dte": settings.strategy_max_dte,
+            "short_delta_min": settings.strategy_short_delta_min,
+            "short_delta_max": settings.strategy_short_delta_max,
+            "max_spread_pct": settings.liquidity_max_spread_pct * 100,
+        },
+        "portfolio_risk_authoritative": False,
+        "approval_ready": False,
+        "execution_enabled": False,
+        "note": (
+            "Candidates passed mechanical market-data and coverage/collateral "
+            "filters only. Aggregate portfolio max-loss accounting remains a "
+            "required hard gate before approval-ready proposals are allowed."
+        ),
+        "tool_errors": scan.tool_errors,
     }
