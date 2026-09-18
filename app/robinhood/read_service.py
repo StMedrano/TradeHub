@@ -21,6 +21,21 @@ def _exception_message(exc: BaseException) -> str:
     return str(exc)
 
 
+def _is_transient_mcp_error(exc: BaseException) -> bool:
+    message = _exception_message(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "sse stream ended without a response",
+            "connection reset",
+            "connection closed",
+            "server disconnected",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
 @dataclass
 class RobinhoodSnapshot:
     connection_state: str = "disabled"
@@ -59,23 +74,44 @@ class RobinhoodReadService:
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
 
+    async def _call_read_with_retry(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
+        last_error: BaseException | None = None
+        for attempt in range(2):
+            try:
+                return await self.client.call(tool_name, arguments)
+            except BaseException as exc:
+                last_error = exc
+                if attempt == 0 and _is_transient_mcp_error(exc):
+                    await asyncio.sleep(0.35)
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"{tool_name} failed without an exception.")
+
     async def _read(
         self,
         tool_name: str,
         *,
         account_number: str | None = None,
     ) -> Any:
-        try:
-            return await self.client.call(tool_name, {})
-        except Exception as first_error:
-            if account_number:
-                try:
-                    return await self.client.call(
-                        tool_name, {"account_number": account_number}
-                    )
-                except Exception as second_error:
-                    raise RuntimeError(str(second_error)) from second_error
-            raise RuntimeError(str(first_error)) from first_error
+        errors: list[BaseException] = []
+        argument_options: list[dict[str, Any]] = [{}]
+        if account_number:
+            argument_options.append({"account_number": account_number})
+
+        for arguments in argument_options:
+            try:
+                return await self._call_read_with_retry(tool_name, arguments)
+            except BaseException as exc:
+                errors.append(exc)
+
+        message = " | ".join(_exception_message(exc) for exc in errors)
+        raise RuntimeError(message)
 
     @staticmethod
     def _agentic_account_number(accounts: Any) -> str | None:
@@ -128,15 +164,19 @@ class RobinhoodReadService:
 
         tool_errors: dict[str, str] = {}
 
+        account_number = self.snapshot.agentic_account_number
         try:
-            accounts = await self.client.accounts()
-            account_number = self._agentic_account_number(accounts)
+            accounts = await self._call_read_with_retry("get_accounts", {})
+            discovered_account = self._agentic_account_number(accounts)
+            if discovered_account:
+                account_number = discovered_account
         except RobinhoodAuthRequired as exc:
             self.snapshot.connection_state = "authentication_required"
             self.snapshot.last_error = str(exc)
             return self.snapshot
-        except Exception as exc:
-            account_number = None
+        except BaseException as exc:
+            # Preserve a previously verified Agentic account number across
+            # transient Robinhood transport failures.
             tool_errors["get_accounts"] = _exception_message(exc)
 
         async def read_tool(name: str) -> Any:
@@ -191,21 +231,61 @@ class RobinhoodReadService:
         except Exception as exc:
             tool_errors["get_realized_pnl"] = _exception_message(exc)
 
-        equity = find_first_number(
-            portfolio,
-            ("total_value", "equity_value", "portfolio_value", "equity"),
+        equity = (
+            find_first_number(
+                portfolio,
+                ("total_value", "equity_value", "portfolio_value", "equity"),
+            )
+            if portfolio is not None
+            else self.snapshot.equity
         )
-        buying_power = find_first_number(
-            portfolio,
-            ("buying_power", "unleveraged_buying_power", "real_time_buying_power"),
+        buying_power = (
+            find_first_number(
+                portfolio,
+                ("buying_power", "unleveraged_buying_power", "real_time_buying_power"),
+            )
+            if portfolio is not None
+            else self.snapshot.buying_power
         )
-        cash = find_first_number(portfolio, ("cash", "cash_value"))
-        options_value = find_first_number(
-            portfolio, ("options_value", "option_value")
+        cash = (
+            find_first_number(portfolio, ("cash", "cash_value"))
+            if portfolio is not None
+            else self.snapshot.cash
+        )
+        options_value = (
+            find_first_number(portfolio, ("options_value", "option_value"))
+            if portfolio is not None
+            else self.snapshot.options_value
+        )
+
+        open_equity_positions = (
+            count_records(equities)
+            if equities is not None
+            else self.snapshot.open_equity_positions
+        )
+        open_option_positions = (
+            count_records(options)
+            if options is not None
+            else self.snapshot.open_option_positions
+        )
+        open_orders = (
+            self._open_order_count(option_orders)
+            if option_orders is not None
+            else self.snapshot.open_orders
+        )
+        equity_position_rows = (
+            extract_records(equities)
+            if equities is not None
+            else self.snapshot.equity_positions
+        )
+        option_position_rows = (
+            extract_records(options)
+            if options is not None
+            else self.snapshot.option_positions
         )
 
         self.snapshot = RobinhoodSnapshot(
-            connection_state="connected" if portfolio is not None else "degraded",
+            connection_state="connected" if portfolio is not None and not tool_errors else "degraded",
             last_sync=datetime.now(timezone.utc).isoformat(),
             last_error=None if not tool_errors else "One or more read tools failed.",
             tool_errors=tool_errors,
@@ -216,12 +296,12 @@ class RobinhoodReadService:
             options_value=options_value,
             realized_pnl_today=realized_pnl,
             realized_pnl_authoritative=realized_pnl_authoritative,
-            open_equity_positions=count_records(equities),
-            open_option_positions=count_records(options),
-            open_orders=self._open_order_count(option_orders),
-            raw_portfolio=portfolio,
-            equity_positions=extract_records(equities),
-            option_positions=extract_records(options),
+            open_equity_positions=open_equity_positions,
+            open_option_positions=open_option_positions,
+            open_orders=open_orders,
+            raw_portfolio=portfolio if portfolio is not None else self.snapshot.raw_portfolio,
+            equity_positions=equity_position_rows,
+            option_positions=option_position_rows,
         )
         return self.snapshot
 
