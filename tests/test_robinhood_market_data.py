@@ -1,4 +1,9 @@
-from app.robinhood.market_data import RobinhoodMarketDataService
+from app.robinhood.market_data import (
+    RobinhoodMarketDataService,
+    _centered_strikes,
+    _equity_quote_price,
+    _infer_strike_step,
+)
 
 
 def test_normalize_contracts_computes_spread_and_greeks():
@@ -112,3 +117,42 @@ def test_chain_and_instrument_arrays_are_counted_directly():
 
     assert len(extract_records(chains)) == 1
     assert len(extract_records(instruments)) == 2
+
+
+
+def test_equity_quote_price_unwraps_live_shape():
+    payload = {
+        "data": {
+            "results": [
+                {
+                    "quote": {
+                        "symbol": "SPY",
+                        "last_trade_price": "763.42",
+                        "bid_price": "763.40",
+                        "ask_price": "763.44",
+                    }
+                }
+            ]
+        }
+    }
+    assert _equity_quote_price(payload) == 763.42
+
+
+def test_infer_strike_step_and_center_search_near_spot():
+    payload = {
+        "data": {
+            "instruments": [
+                {"strike_price": "490.0000"},
+                {"strike_price": "495.0000"},
+                {"strike_price": "500.0000"},
+            ]
+        }
+    }
+    step = _infer_strike_step(payload)
+    assert step == 5.0
+
+    strikes = [float(value) for value in _centered_strikes(763.42, step)]
+    assert len(strikes) == 13
+    assert min(strikes) < 700
+    assert max(strikes) > 825
+    assert min(abs(value - 763.42) for value in strikes) <= 5.0
