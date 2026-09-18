@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.robinhood.client import RobinhoodTradingMCP
-from app.robinhood.normalize import extract_candidate_records, extract_records, find_first_list
+from app.robinhood.normalize import extract_candidate_records, extract_records, find_first_list, payload_shape
 from app.robinhood.schema_args import build_arguments
 
 
@@ -38,6 +38,7 @@ class OptionScanResult:
     quote_count: int = 0
     contracts: list[dict[str, Any]] = field(default_factory=list)
     tool_errors: dict[str, str] = field(default_factory=dict)
+    response_shapes: dict[str, Any] = field(default_factory=dict)
 
 
 class RobinhoodMarketDataService:
@@ -212,6 +213,11 @@ class RobinhoodMarketDataService:
             quote_count=len(extract_records(quotes) or extract_candidate_records(quotes)),
             contracts=self._normalize_contracts(instruments, quotes),
             tool_errors=errors,
+            response_shapes={
+                "get_option_chains": payload_shape(chains),
+                "get_option_instruments": payload_shape(instruments),
+                "get_option_quotes": payload_shape(quotes),
+            },
         )
 
 
