@@ -20,7 +20,7 @@ if ASSETS_DIR.exists():
 
 
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     init_db()
     robinhood_read_service.start()
 
