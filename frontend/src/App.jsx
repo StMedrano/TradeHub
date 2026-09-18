@@ -420,6 +420,7 @@ export default function App() {
   const [scanResult, setScanResult] = useState(null);
   const [candidateResult, setCandidateResult] = useState(null);
   const [scanning, setScanning] = useState(false);
+  const [promotingId, setPromotingId] = useState(null);
   const [error, setError] = useState("");
   const previousApprovals = useRef(0);
   const [dialog, setDialog] = useState({
@@ -530,6 +531,40 @@ export default function App() {
   async function enableNotifications() {
     if ("Notification" in window) {
       await Notification.requestPermission();
+    }
+  }
+
+  async function promoteCandidate(candidate) {
+    if (!candidate?.option_id || !candidateResult?.symbol) return;
+    setPromotingId(candidate.option_id);
+    try {
+      const response = await fetch("/api/opportunities/promote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: candidateResult.symbol,
+          option_id: candidate.option_id
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        const detail = body.detail;
+        if (typeof detail === "object" && detail?.reasons) {
+          throw new Error(detail.reasons.join(" · "));
+        }
+        throw new Error(
+          typeof detail === "string" ? detail : "Candidate promotion failed."
+        );
+      }
+
+      await refresh(true);
+      await scanOptions();
+      setSection("approvals");
+      setError("");
+    } catch (err) {
+      setError(err.message || "Candidate promotion failed.");
+    } finally {
+      setPromotingId(null);
     }
   }
 
@@ -737,7 +772,14 @@ export default function App() {
                         <Badge color="gray" variant="soft">{candidateResult.rejected_contracts} filtered</Badge>
                       </>
                     ) : null}
-                    <Badge color="amber" variant="soft">PORTFOLIO RISK PENDING</Badge>
+                    <Badge
+                      color={candidateResult?.approval_ready ? "green" : "amber"}
+                      variant="soft"
+                    >
+                      {candidateResult?.approval_ready
+                        ? "DRY-RUN PROMOTION READY"
+                        : "PORTFOLIO RISK PENDING"}
+                    </Badge>
                   </Flex>
                 </Flex>
 
@@ -758,6 +800,7 @@ export default function App() {
                           <Table.ColumnHeaderCell>Collateral</Table.ColumnHeaderCell>
                           <Table.ColumnHeaderCell>Score</Table.ColumnHeaderCell>
                           <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Action</Table.ColumnHeaderCell>
                         </Table.Row>
                       </Table.Header>
                       <Table.Body>
@@ -783,6 +826,31 @@ export default function App() {
                                 {row.risk_status.replaceAll("_", " ")}
                               </Badge>
                             </Table.Cell>
+                            <Table.Cell>
+                              {row.strategy === "cash_secured_put" ? (
+                                <Button
+                                  size="1"
+                                  variant={candidateResult?.approval_ready ? "solid" : "soft"}
+                                  disabled={
+                                    !candidateResult?.approval_ready ||
+                                    row.buying_power_sufficient !== true ||
+                                    promotingId === row.option_id
+                                  }
+                                  onClick={() => promoteCandidate(row)}
+                                >
+                                  {promotingId === row.option_id ? (
+                                    <ReloadIcon className="spin" />
+                                  ) : (
+                                    <CheckCircledIcon />
+                                  )}
+                                  Promote
+                                </Button>
+                              ) : (
+                                <Tooltip content="Covered-call promotion remains locked until whole-position stock risk is authoritative.">
+                                  <Badge color="gray" variant="soft">Locked</Badge>
+                                </Tooltip>
+                              )}
+                            </Table.Cell>
                           </Table.Row>
                         ))}
                       </Table.Body>
@@ -797,9 +865,16 @@ export default function App() {
                 )}
 
                 {candidateResult ? (
-                  <Callout.Root color="amber" mt="4">
-                    <Callout.Icon><LockClosedIcon /></Callout.Icon>
-                    <Callout.Text>{candidateResult.note}</Callout.Text>
+                  <Callout.Root color={candidateResult.approval_ready ? "green" : "amber"} mt="4">
+                    <Callout.Icon>
+                      {candidateResult.approval_ready ? <CheckCircledIcon /> : <LockClosedIcon />}
+                    </Callout.Icon>
+                    <Callout.Text>
+                      {candidateResult.note}
+                      {!candidateResult.approval_ready && candidateResult.risk_state_reasons?.length
+                        ? " " + candidateResult.risk_state_reasons.join(" · ")
+                        : ""}
+                    </Callout.Text>
                   </Callout.Root>
                 ) : null}
                 {candidateResult?.diagnostics?.some((item) => !item.passed) ? (
