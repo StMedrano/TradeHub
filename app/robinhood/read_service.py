@@ -6,7 +6,7 @@ from typing import Any
 
 from app.config import settings
 from app.robinhood.client import RobinhoodAuthRequired, RobinhoodTradingMCP
-from app.robinhood.normalize import count_records, extract_records, find_first_list, find_first_number, is_effectively_empty
+from app.robinhood.normalize import count_records, extract_records, find_first_list, find_first_number, is_effectively_empty, payload_shape
 from app.robinhood.schema_args import build_arguments
 
 
@@ -49,6 +49,7 @@ class RobinhoodSnapshot:
     options_value: float | None = None
     realized_pnl_today: float | None = None
     realized_pnl_authoritative: bool = False
+    realized_pnl_shape: Any = None
     open_equity_positions: int = 0
     open_option_positions: int = 0
     open_orders: int = 0
@@ -193,6 +194,7 @@ class RobinhoodReadService:
 
         realized_pnl = None
         realized_pnl_authoritative = False
+        realized_pnl_shape = None
         try:
             catalog = await self.client.tool_catalog()
             tool = catalog.get("get_realized_pnl")
@@ -208,26 +210,37 @@ class RobinhoodReadService:
                     },
                 )
                 realized_payload = await self.client.call("get_realized_pnl", pnl_args)
+                realized_pnl_shape = payload_shape(realized_payload)
                 realized_pnl = find_first_number(
                     realized_payload,
                     (
-                        "realized_pnl",
-                        "realized_pl",
+                        "total_realized_gain",
                         "total_realized_pnl",
+                        "realized_pnl",
+                        "realized_gain",
+                        "realized_pl",
                         "realized_profit_loss",
                         "net_realized_pnl",
-                        "pnl",
                         "profit_loss",
+                        "pnl",
                         "amount",
                         "total",
                     ),
                 )
                 if realized_pnl is not None:
                     realized_pnl_authoritative = True
-                elif is_effectively_empty(realized_payload):
-                    # A successful empty same-day query means no realized P&L yet today.
-                    realized_pnl = 0.0
-                    realized_pnl_authoritative = True
+                else:
+                    data_section = (
+                        realized_payload.get("data")
+                        if isinstance(realized_payload, dict) and "data" in realized_payload
+                        else realized_payload
+                    )
+                    if is_effectively_empty(data_section):
+                        # Robinhood can return a non-empty guide wrapper with
+                        # an empty data payload when there are no realized
+                        # trades in the requested same-day span.
+                        realized_pnl = 0.0
+                        realized_pnl_authoritative = True
         except Exception as exc:
             tool_errors["get_realized_pnl"] = _exception_message(exc)
 
@@ -296,6 +309,7 @@ class RobinhoodReadService:
             options_value=options_value,
             realized_pnl_today=realized_pnl,
             realized_pnl_authoritative=realized_pnl_authoritative,
+            realized_pnl_shape=realized_pnl_shape,
             open_equity_positions=open_equity_positions,
             open_option_positions=open_option_positions,
             open_orders=open_orders,
