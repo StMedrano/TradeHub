@@ -151,3 +151,35 @@ def extract_candidate_records(value: Any) -> list[dict[str, Any]]:
         seen.add(marker)
         deduped.append(row)
     return deduped
+
+
+
+def payload_shape(value: Any, depth: int = 0, max_depth: int = 3) -> Any:
+    """Return structure metadata only; never return payload values."""
+    if depth >= max_depth:
+        if isinstance(value, list):
+            return {"type": "list", "length": len(value)}
+        if isinstance(value, dict):
+            return {"type": "object", "keys": sorted(str(k) for k in value.keys())}
+        return {"type": type(value).__name__}
+
+    if isinstance(value, list):
+        sample = value[:3]
+        return {
+            "type": "list",
+            "length": len(value),
+            "items": [payload_shape(item, depth + 1, max_depth) for item in sample],
+        }
+
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "keys": sorted(str(k) for k in value.keys()),
+            "children": {
+                str(key): payload_shape(child, depth + 1, max_depth)
+                for key, child in list(value.items())[:20]
+                if isinstance(child, (dict, list))
+            },
+        }
+
+    return {"type": type(value).__name__}
