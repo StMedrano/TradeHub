@@ -79,3 +79,15 @@ def count_records(value: Any) -> int:
             if isinstance(child, list):
                 return len(child)
     return 0
+
+
+
+def extract_records(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, dict)]
+    if isinstance(value, dict):
+        for key in ("results", "positions", "orders", "items"):
+            rows = find_first_list(value, (key,))
+            if rows is not None:
+                return [row for row in rows if isinstance(row, dict)]
+    return []
