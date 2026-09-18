@@ -30,3 +30,28 @@ def test_find_results_list():
 def test_count_records_from_results():
     payload = {"data": {"results": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}}
     assert count_records(payload) == 3
+
+
+
+def test_extract_candidate_records_handles_single_nested_objects():
+    from app.robinhood.normalize import extract_candidate_records
+
+    payload = {
+        "data": {
+            "chain": {
+                "id": "chain-1",
+                "symbol": "SPY",
+            }
+        }
+    }
+
+    rows = extract_candidate_records(payload)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "chain-1"
+
+
+def test_is_effectively_empty_nested_payload():
+    from app.robinhood.normalize import is_effectively_empty
+
+    assert is_effectively_empty({"data": {"results": []}})
+    assert not is_effectively_empty({"data": {"realized_pnl": 0}})
