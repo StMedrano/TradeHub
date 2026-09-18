@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from app.config import settings
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.normalize import extract_candidate_records, extract_records, find_first_list, payload_shape
 from app.robinhood.schema_args import build_arguments
@@ -27,6 +28,53 @@ def _as_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _quote_records(value: Any) -> list[dict[str, Any]]:
+    rows = extract_records(value) or extract_candidate_records(value)
+    quotes: list[dict[str, Any]] = []
+    for row in rows:
+        nested = row.get("quote") if isinstance(row, dict) else None
+        if isinstance(nested, dict):
+            quotes.append(nested)
+        elif isinstance(row, dict):
+            quotes.append(row)
+
+    # Some MCP payloads expose only wrapper rows through extract_records();
+    # recursively inspect the payload if those wrappers contained no quote data.
+    if quotes and all(
+        not any(
+            key in quote
+            for key in (
+                "bid_price",
+                "ask_price",
+                "mark_price",
+                "implied_volatility",
+                "delta",
+                "open_interest",
+                "instrument_id",
+                "option_id",
+                "id",
+            )
+        )
+        for quote in quotes
+    ):
+        quotes = [
+            row
+            for row in extract_candidate_records(value)
+            if any(
+                key in row
+                for key in (
+                    "bid_price",
+                    "ask_price",
+                    "mark_price",
+                    "implied_volatility",
+                    "delta",
+                    "open_interest",
+                )
+            )
+        ]
+    return quotes
 
 
 @dataclass
@@ -64,6 +112,27 @@ class RobinhoodMarketDataService:
         return await self.client.call(tool_name, args)
 
     @staticmethod
+    def _eligible_expirations(chains: Any) -> list[str]:
+        rows = extract_records(chains) or extract_candidate_records(chains)
+        today = datetime.now(timezone.utc).date()
+        eligible: set[str] = set()
+
+        for row in rows:
+            raw_dates = row.get("expiration_dates")
+            if not isinstance(raw_dates, list):
+                continue
+            for raw in raw_dates:
+                try:
+                    expiry = datetime.fromisoformat(str(raw)[:10]).date()
+                except ValueError:
+                    continue
+                dte = (expiry - today).days
+                if settings.strategy_min_dte <= dte <= settings.strategy_max_dte:
+                    eligible.add(expiry.isoformat())
+
+        return sorted(eligible)
+
+    @staticmethod
     def _chain_id(chains: Any) -> str | None:
         rows = extract_records(chains) or extract_candidate_records(chains)
         for row in rows:
@@ -87,7 +156,7 @@ class RobinhoodMarketDataService:
     @staticmethod
     def _normalize_contracts(instruments: Any, quotes: Any) -> list[dict[str, Any]]:
         instrument_rows = extract_records(instruments) or extract_candidate_records(instruments)
-        quote_rows = extract_records(quotes) or extract_candidate_records(quotes)
+        quote_rows = _quote_records(quotes)
 
         quote_map: dict[str, dict[str, Any]] = {}
         for quote in quote_rows:
@@ -179,9 +248,19 @@ class RobinhoodMarketDataService:
             errors["get_option_chains"] = str(exc)
 
         chain_id = self._chain_id(chains)
-        instrument_context: dict[str, Any] = {"symbol": symbol}
+        eligible_expirations = self._eligible_expirations(chains)
+        instrument_context: dict[str, Any] = {
+            "symbol": symbol,
+            "state": "active",
+        }
         if chain_id:
             instrument_context["chain_id"] = chain_id
+        if eligible_expirations:
+            # build_arguments() only forwards keys actually advertised by the
+            # live Robinhood schema, so supplying both singular/plural context
+            # remains schema-safe.
+            instrument_context["expiration_dates"] = eligible_expirations
+            instrument_context["expiration_date"] = eligible_expirations[0]
 
         instruments = None
         try:
