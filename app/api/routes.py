@@ -12,6 +12,7 @@ from app.persistence.models import AuditEvent, TradeProposal, UnderlyingPause
 from app.risk.manager import RiskManager
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.read_service import robinhood_read_service
+from app.robinhood.market_data import robinhood_market_data
 
 router = APIRouter(prefix="/api")
 risk_manager = RiskManager()
@@ -335,4 +336,51 @@ def robinhood_positions():
         "last_sync": snapshot.last_sync,
         "equities": equities,
         "options": options,
+    }
+
+
+
+@router.get("/robinhood/tool-schemas")
+async def robinhood_tool_schemas():
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(409, "Robinhood MCP is disabled.")
+    catalog = await robinhood.tool_catalog()
+    allowed = {
+        name: data
+        for name, data in catalog.items()
+        if name.startswith("get_")
+    }
+    return {"tools": allowed}
+
+
+@router.get("/opportunities/scan")
+async def scan_option_opportunities(symbol: str):
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(409, "Robinhood MCP is disabled.")
+    if robinhood_read_service.snapshot.connection_state not in {
+        "connected",
+        "degraded",
+    }:
+        raise HTTPException(
+            409,
+            "Robinhood read connection is not ready. Complete OAuth and sync first.",
+        )
+
+    try:
+        result = await robinhood_market_data.scan_symbol(symbol)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Robinhood option scan failed: {exc}") from exc
+
+    return {
+        "symbol": result.symbol,
+        "scanned_at": result.scanned_at,
+        "chain_count": result.chain_count,
+        "instrument_count": result.instrument_count,
+        "quote_count": result.quote_count,
+        "contracts": result.contracts,
+        "tool_errors": result.tool_errors,
+        "execution_enabled": False,
+        "informational_only": True,
     }
