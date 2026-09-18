@@ -402,6 +402,7 @@ async def scan_option_opportunities(symbol: str):
         "quote_count": result.quote_count,
         "contracts": result.contracts,
         "tool_errors": result.tool_errors,
+        "response_shapes": result.response_shapes,
         "execution_enabled": False,
         "informational_only": True,
     }
@@ -475,6 +476,7 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             else "Candidates remain non-executable until all authoritative risk gates pass."
         ),
         "tool_errors": scan.tool_errors,
+        "response_shapes": scan.response_shapes,
     }
 
 
