@@ -394,7 +394,7 @@ async def scan_option_opportunities(symbol: str):
 
 
 @router.get("/opportunities/candidates")
-async def phase_one_candidates(symbol: str):
+async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
     if not settings.robinhood_mcp_enabled:
         raise HTTPException(409, "Robinhood MCP is disabled.")
     if robinhood_read_service.snapshot.connection_state not in {
@@ -424,6 +424,16 @@ async def phase_one_candidates(symbol: str):
             f"Robinhood strategy scan failed: {exc}",
         ) from exc
 
+    risk_state = portfolio_risk_state_service.build(
+        db,
+        robinhood_read_service.snapshot,
+    )
+    promotable_csp_exists = any(
+        candidate.strategy == "cash_secured_put"
+        and candidate.buying_power_sufficient is True
+        for candidate in candidates
+    )
+
     return {
         "symbol": scan.symbol,
         "scanned_at": scan.scanned_at,
@@ -440,13 +450,14 @@ async def phase_one_candidates(symbol: str):
             "short_delta_max": settings.strategy_short_delta_max,
             "max_spread_pct": settings.liquidity_max_spread_pct * 100,
         },
-        "portfolio_risk_authoritative": False,
-        "approval_ready": False,
+        "portfolio_risk_authoritative": risk_state.authoritative,
+        "risk_state_reasons": list(risk_state.reasons),
+        "approval_ready": risk_state.authoritative and promotable_csp_exists,
         "execution_enabled": False,
         "note": (
-            "Candidates passed mechanical market-data and coverage/collateral "
-            "filters only. Aggregate portfolio max-loss accounting remains a "
-            "required hard gate before approval-ready proposals are allowed."
+            "A CSP can be promoted into the dry-run approval queue."
+            if risk_state.authoritative and promotable_csp_exists
+            else "Candidates remain non-executable until all authoritative risk gates pass."
         ),
         "tool_errors": scan.tool_errors,
     }
