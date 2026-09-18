@@ -11,6 +11,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "account_number": ("account_number", "account_id", "rhs_account_number"),
     "start_date": ("start_date", "from_date", "start"),
     "end_date": ("end_date", "to_date", "end"),
+    "span": ("span", "period", "window"),
 }
 
 
