@@ -19,8 +19,8 @@
 - [x] OAuth/token persistence for the Robinhood MCP session
 - [x] Account/balance normalization
 - [~] Equity holdings sync (detail view still pending)
-- [ ] Option chains/instruments
-- [ ] Option quotes
+- [~] Option chains/instruments (schema-aware read scanner added)
+- [~] Option quotes/IV/Greeks (schema-aware read scanner added)
 - [~] Option positions sync (detail view still pending)
 - [~] Option order sync (history/detail view still pending)
 - [ ] Expiration calendar
