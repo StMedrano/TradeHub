@@ -65,3 +65,21 @@ def test_build_arguments_passes_span_when_live_schema_advertises_it():
     }
 
     assert build_arguments(schema, {"span": "day"}) == {"span": "day"}
+
+
+
+def test_string_schema_joins_expiration_date_list():
+    schema = {
+        "type": "object",
+        "properties": {
+            "expiration_dates": {"type": "string"},
+        },
+        "required": ["expiration_dates"],
+    }
+
+    args = build_arguments(
+        schema,
+        {"expiration_dates": ["2026-10-02", "2026-10-09"]},
+    )
+
+    assert args == {"expiration_dates": "2026-10-02,2026-10-09"}
