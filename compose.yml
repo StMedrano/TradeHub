@@ -28,6 +28,8 @@ services:
         condition: service_healthy
     ports:
       - "8787:8787"
+    volumes:
+      - tradehub-secrets:/data
     networks:
       - tradehub_internal
     read_only: true
@@ -44,3 +46,4 @@ networks:
 
 volumes:
   tradehub-db:
+  tradehub-secrets:
