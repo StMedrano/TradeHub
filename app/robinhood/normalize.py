@@ -87,3 +87,67 @@ def extract_records(value: Any) -> list[dict[str, Any]]:
             if rows is not None:
                 return [row for row in rows if isinstance(row, dict)]
     return []
+
+
+def is_effectively_empty(value: Any) -> bool:
+    if value is None:
+        return True
+    if value == "":
+        return True
+    if isinstance(value, (list, tuple, set, dict)):
+        if not value:
+            return True
+        if isinstance(value, dict):
+            return all(is_effectively_empty(child) for child in value.values())
+        return all(is_effectively_empty(child) for child in value)
+    return False
+
+
+def extract_candidate_records(value: Any) -> list[dict[str, Any]]:
+    """Recursively collect record-like dictionaries from MCP payloads.
+
+    Robinhood tool responses may wrap arrays under names other than results/items,
+    or return a single contract/chain object. We collect leaf-ish dictionaries
+    that contain common market/account record fields.
+    """
+    records: list[dict[str, Any]] = []
+
+    record_keys = {
+        "id", "chain_id", "option_chain_id", "option_id", "instrument_id",
+        "symbol", "chain_symbol", "underlying_symbol", "expiration_date",
+        "strike_price", "type", "option_type", "bid_price", "ask_price",
+        "mark_price", "delta", "gamma", "theta", "vega", "rho",
+        "open_interest", "volume", "quantity", "state"
+    }
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for child in node:
+                walk(child)
+            return
+
+        if not isinstance(node, dict):
+            return
+
+        lowered = {str(k).lower() for k in node.keys()}
+        if lowered & record_keys:
+            records.append(node)
+
+        for child in node.values():
+            if isinstance(child, (dict, list)):
+                walk(child)
+
+    walk(value)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in records:
+        try:
+            marker = json.dumps(row, sort_keys=True, default=str)
+        except TypeError:
+            marker = str(row)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(row)
+    return deduped
