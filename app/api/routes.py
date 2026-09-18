@@ -407,6 +407,10 @@ async def phase_one_candidates(symbol: str):
             scan,
             robinhood_read_service.snapshot,
         )
+        diagnostics = phase_one_candidate_engine.diagnose(
+            scan,
+            robinhood_read_service.snapshot,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -419,6 +423,9 @@ async def phase_one_candidates(symbol: str):
         "symbol": scan.symbol,
         "scanned_at": scan.scanned_at,
         "candidates": [candidate.as_dict() for candidate in candidates],
+        "diagnostics": [item.as_dict() for item in diagnostics],
+        "passed_contracts": sum(1 for item in diagnostics if item.passed),
+        "rejected_contracts": sum(1 for item in diagnostics if not item.passed),
         "filters": {
             "min_open_interest": settings.strategy_min_open_interest,
             "min_volume": settings.strategy_min_volume,
