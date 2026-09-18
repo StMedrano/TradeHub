@@ -219,6 +219,17 @@ def dashboard_summary(db: Session = Depends(db_session)):
     ).all()
 
     snapshot = robinhood_read_service.snapshot
+    risk_state = portfolio_risk_state_service.build(db, snapshot)
+    authoritative_open_risk = (
+        float(risk_state.snapshot.open_position_max_loss)
+        if risk_state.authoritative and risk_state.snapshot is not None
+        else None
+    )
+    risk_utilization_pct = (
+        authoritative_open_risk / snapshot.equity * 100
+        if authoritative_open_risk is not None and snapshot.equity
+        else None
+    )
 
     # Brokerage values come only from the authenticated Robinhood MCP read path.
     # Unsynced fields remain null rather than being simulated.
@@ -234,8 +245,10 @@ def dashboard_summary(db: Session = Depends(db_session)):
             else None
         ),
         "total_pnl": None,
-        "open_risk": None,
-        "risk_utilization_pct": None,
+        "open_risk": authoritative_open_risk,
+        "risk_utilization_pct": risk_utilization_pct,
+        "portfolio_risk_authoritative": risk_state.authoritative,
+        "portfolio_risk_reasons": list(risk_state.reasons),
         "open_positions": snapshot.open_positions,
         "open_orders": snapshot.open_orders,
         "pending_approvals": len(pending),
@@ -288,6 +301,8 @@ def robinhood_status():
         "open_equity_positions": snapshot.open_equity_positions,
         "open_option_positions": snapshot.open_option_positions,
         "open_orders": snapshot.open_orders,
+        "realized_pnl_today": snapshot.realized_pnl_today,
+        "realized_pnl_authoritative": snapshot.realized_pnl_authoritative,
     }
 
 
