@@ -191,9 +191,9 @@ class RobinhoodMarketDataService:
 
             bid = _as_float(_quote_value(quote, ("bid_price", "bid", "bidPrice")))
             ask = _as_float(_quote_value(quote, ("ask_price", "ask", "askPrice")))
-            mark = _as_float(_quote_value(quote, ("mark_price", "mark", "markPrice")))
+            mark = _as_float(_quote_value(quote, ("mark_price", "adjusted_mark_price", "mark", "markPrice")))
             iv = _as_float(
-                _first_value(
+                _quote_value(
                     quote,
                     ("implied_volatility", "iv", "impliedVolatility"),
                 )
@@ -223,7 +223,7 @@ class RobinhoodMarketDataService:
                     "mark": mark,
                     "spread_pct": spread_pct,
                     "volume": _quote_value(quote, ("volume",)),
-                    "open_interest": _first_value(
+                    "open_interest": _quote_value(
                         quote, ("open_interest", "openInterest")
                     ),
                     "implied_volatility": iv,
