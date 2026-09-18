@@ -156,6 +156,7 @@ class RobinhoodReadService:
                         "account_number": account_number,
                         "start_date": today,
                         "end_date": today,
+                        "span": "day",
                     },
                 )
                 realized_payload = await self.client.call("get_realized_pnl", pnl_args)
