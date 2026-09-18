@@ -9,6 +9,7 @@ from app.robinhood.schema_args import build_arguments
 
 
 READ_ONLY_OPTION_TOOLS = {
+    "get_equity_quotes",
     "get_option_chains",
     "get_option_instruments",
     "get_option_quotes",
@@ -91,6 +92,80 @@ def _quote_records(value: Any) -> list[dict[str, Any]]:
     return quotes
 
 
+def _equity_quote_price(value: Any) -> float | None:
+    rows = extract_records(value) or extract_candidate_records(value)
+    for row in rows:
+        quote = row.get("quote") if isinstance(row, dict) else None
+        if not isinstance(quote, dict):
+            quote = row if isinstance(row, dict) else {}
+        price = _as_float(
+            _first_value(
+                quote,
+                (
+                    "last_trade_price",
+                    "last_non_reg_trade_price",
+                    "mark_price",
+                    "previous_close",
+                ),
+            )
+        )
+        if price is not None and price > 0:
+            return price
+        bid = _as_float(_first_value(quote, ("bid_price", "bid")))
+        ask = _as_float(_first_value(quote, ("ask_price", "ask")))
+        if bid is not None and ask is not None and bid > 0 and ask >= bid:
+            return (bid + ask) / 2
+    return None
+
+
+def _infer_strike_step(instruments: Any) -> float | None:
+    strikes: list[float] = []
+    for row in (extract_records(instruments) or extract_candidate_records(instruments)):
+        value = _as_float(_first_value(row, ("strike_price", "strike")))
+        if value is not None and value > 0:
+            strikes.append(value)
+    unique = sorted(set(strikes))
+    gaps = [
+        round(b - a, 6)
+        for a, b in zip(unique, unique[1:])
+        if b > a
+    ]
+    positive = [gap for gap in gaps if gap > 0]
+    return min(positive) if positive else None
+
+
+def _centered_strikes(price: float, step: float, levels: int = 13) -> list[str]:
+    if price <= 0 or step <= 0:
+        return []
+    center = round(price / step) * step
+    half = levels // 2
+    # Cover roughly +/-15% of spot, while staying on the instrument strike grid.
+    span = max(step * half, price * 0.15)
+    stride_steps = max(1, round((span / half) / step)) if half else 1
+    values = {
+        round(center + offset * stride_steps * step, 4)
+        for offset in range(-half, half + 1)
+        if center + offset * stride_steps * step > 0
+    }
+    return [f"{value:.4f}" for value in sorted(values)]
+
+
+def _merge_instrument_payloads(payloads: list[Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for payload in payloads:
+        for row in (extract_records(payload) or extract_candidate_records(payload)):
+            option_id = _first_value(
+                row, ("id", "option_id", "instrument_id", "option_instrument_id")
+            )
+            marker = str(option_id) if option_id else repr(sorted(row.items()))
+            if marker in seen:
+                continue
+            seen.add(marker)
+            rows.append(row)
+    return {"data": {"instruments": rows}}
+
+
 @dataclass
 class OptionScanResult:
     symbol: str
@@ -98,6 +173,9 @@ class OptionScanResult:
     chain_count: int = 0
     instrument_count: int = 0
     quote_count: int = 0
+    underlying_price: float | None = None
+    selected_expirations: list[str] = field(default_factory=list)
+    strike_search_count: int = 0
     contracts: list[dict[str, Any]] = field(default_factory=list)
     tool_errors: dict[str, str] = field(default_factory=dict)
     response_shapes: dict[str, Any] = field(default_factory=dict)
@@ -263,6 +341,19 @@ class RobinhoodMarketDataService:
 
         chain_id = self._chain_id(chains)
         eligible_expirations = self._eligible_expirations(chains)
+
+        equity_quote = None
+        underlying_price = None
+        try:
+            equity_quote = await self._call_schema_aware(
+                "get_equity_quotes",
+                {"symbols": [symbol], "symbol": symbol},
+                catalog,
+            )
+            underlying_price = _equity_quote_price(equity_quote)
+        except Exception as exc:
+            errors["get_equity_quotes"] = str(exc)
+
         instrument_context: dict[str, Any] = {
             "symbol": symbol,
             "state": "active",
@@ -270,21 +361,80 @@ class RobinhoodMarketDataService:
         if chain_id:
             instrument_context["chain_id"] = chain_id
         if eligible_expirations:
-            # build_arguments() only forwards keys actually advertised by the
-            # live Robinhood schema, so supplying both singular/plural context
-            # remains schema-safe.
             instrument_context["expiration_dates"] = eligible_expirations
             instrument_context["expiration_date"] = eligible_expirations[0]
 
         instruments = None
+        initial_instruments = None
         try:
-            instruments = await self._call_schema_aware(
+            initial_instruments = await self._call_schema_aware(
                 "get_option_instruments",
                 instrument_context,
                 catalog,
             )
+            instruments = initial_instruments
         except Exception as exc:
             errors["get_option_instruments"] = str(exc)
+
+        strike_search_count = 0
+        instrument_schema = (catalog.get("get_option_instruments") or {}).get(
+            "input_schema"
+        ) or {}
+        instrument_props = instrument_schema.get("properties") or {}
+        strike_filter_supported = "strike_price" in instrument_props or "strike" in instrument_props
+
+        strike_step = _infer_strike_step(initial_instruments)
+        centered_strikes = (
+            _centered_strikes(underlying_price, strike_step)
+            if underlying_price is not None and strike_step is not None
+            else []
+        )
+
+        if strike_filter_supported and centered_strikes:
+            centered_payloads: list[Any] = []
+            for strike in centered_strikes:
+                strike_context = dict(instrument_context)
+                strike_context["strike_price"] = strike
+                strike_context["strike"] = strike
+                try:
+                    centered_payloads.append(
+                        await self._call_schema_aware(
+                            "get_option_instruments",
+                            strike_context,
+                            catalog,
+                        )
+                    )
+                    strike_search_count += 1
+                except Exception as exc:
+                    errors[f"get_option_instruments:{strike}"] = str(exc)
+
+            merged = _merge_instrument_payloads(centered_payloads)
+            if extract_records(merged):
+                instruments = merged
+
+        instrument_rows = extract_records(instruments) or extract_candidate_records(instruments)
+        if underlying_price is not None:
+            target_dte = (settings.strategy_min_dte + settings.strategy_max_dte) / 2
+            def relevance(row: dict[str, Any]) -> tuple[float, float]:
+                strike = _as_float(_first_value(row, ("strike_price", "strike"))) or 0.0
+                expiry = _first_value(row, ("expiration_date", "expiry", "expiration"))
+                dte_distance = 9999.0
+                if expiry:
+                    try:
+                        expiry_date = datetime.fromisoformat(str(expiry)[:10]).date()
+                        dte = (expiry_date - datetime.now(timezone.utc).date()).days
+                        dte_distance = abs(dte - target_dte)
+                    except ValueError:
+                        pass
+                strike_distance = (
+                    abs(strike - underlying_price) / underlying_price
+                    if strike > 0 and underlying_price > 0
+                    else 9999.0
+                )
+                return (strike_distance, dte_distance)
+
+            instrument_rows = sorted(instrument_rows, key=relevance)[:100]
+            instruments = {"data": {"instruments": instrument_rows}}
 
         option_ids = self._option_ids(instruments)
         quotes = None
@@ -304,10 +454,14 @@ class RobinhoodMarketDataService:
             chain_count=len(extract_records(chains) or extract_candidate_records(chains)),
             instrument_count=len(extract_records(instruments) or extract_candidate_records(instruments)),
             quote_count=len(extract_records(quotes) or extract_candidate_records(quotes)),
+            underlying_price=underlying_price,
+            selected_expirations=eligible_expirations,
+            strike_search_count=strike_search_count,
             contracts=self._normalize_contracts(instruments, quotes),
             tool_errors=errors,
             response_shapes={
                 "get_option_chains": payload_shape(chains),
+                "get_equity_quotes": payload_shape(equity_quote),
                 "get_option_instruments": payload_shape(instruments),
                 "get_option_quotes": payload_shape(quotes),
             },
