@@ -298,3 +298,41 @@ async def robinhood_sync():
         "last_error": snapshot.last_error,
         "tool_errors": snapshot.tool_errors,
     }
+
+
+
+@router.get("/positions")
+def robinhood_positions():
+    snapshot = robinhood_read_service.snapshot
+
+    equities = [
+        {
+            "symbol": row.get("symbol"),
+            "quantity": row.get("quantity"),
+            "average_buy_price": row.get("average_buy_price"),
+            "shares_available_for_sells": row.get("shares_available_for_sells"),
+            "direction": row.get("type"),
+        }
+        for row in snapshot.equity_positions
+    ]
+
+    options = [
+        {
+            "symbol": row.get("chain_symbol") or row.get("symbol"),
+            "option_id": row.get("option_id") or row.get("instrument_id"),
+            "direction": row.get("type"),
+            "quantity": row.get("quantity"),
+            "average_price": row.get("average_price"),
+            "expiration_date": row.get("expiration_date"),
+            "trade_value_multiplier": row.get("trade_value_multiplier"),
+            "opened_at": row.get("opened_at"),
+        }
+        for row in snapshot.option_positions
+    ]
+
+    return {
+        "connection_state": snapshot.connection_state,
+        "last_sync": snapshot.last_sync,
+        "equities": equities,
+        "options": options,
+    }
