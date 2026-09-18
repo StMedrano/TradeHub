@@ -414,6 +414,7 @@ export default function App() {
   const [approvals, setApprovals] = useState([]);
   const [pauses, setPauses] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [positions, setPositions] = useState({ equities: [], options: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const previousApprovals = useRef(0);
@@ -432,14 +433,15 @@ export default function App() {
         fetch("/api/dashboard/summary"),
         fetch("/api/approvals"),
         fetch("/api/pauses"),
-        fetch("/api/activity")
+        fetch("/api/activity"),
+        fetch("/api/positions")
       ]);
 
       if (responses.some((r) => !r.ok)) {
         throw new Error("TradeHub API returned an error.");
       }
 
-      const [nextSummary, nextApprovals, nextPauses, nextActivity] = await Promise.all(
+      const [nextSummary, nextApprovals, nextPauses, nextActivity, nextPositions] = await Promise.all(
         responses.map((r) => r.json())
       );
 
@@ -459,6 +461,7 @@ export default function App() {
       setApprovals(nextApprovals);
       setPauses(nextPauses);
       setActivity(nextActivity);
+      setPositions(nextPositions);
       setError("");
     } catch (err) {
       setError(err.message || "Unable to load TradeHub.");
@@ -714,14 +717,101 @@ export default function App() {
     }
 
     if (section === "positions") {
+      const hasPositions = positions.equities.length || positions.options.length;
+      if (!hasPositions) {
+        return (
+          <Card className="large-card">
+            <EmptyPanel
+              icon={BackpackIcon}
+              title="No synchronized positions"
+              body={
+                summary?.robinhood_connection_state === "connected"
+                  ? "Robinhood is connected and no open stock or option positions were returned."
+                  : "Authenticate Robinhood MCP to populate live stock and option positions."
+              }
+            />
+          </Card>
+        );
+      }
+
       return (
-        <Card className="large-card">
-          <EmptyPanel
-            icon={BackpackIcon}
-            title="No synchronized positions"
-            body="Once Robinhood MCP read access is enabled, stock and option positions will appear here with P&L, Greeks, expirations, and max-loss exposure."
-          />
-        </Card>
+        <Flex direction="column" gap="4">
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="4">
+              <Box>
+                <Heading size="4">Equity Positions</Heading>
+                <Text size="2" color="gray">Robinhood holdings synced read-only</Text>
+              </Box>
+              <Badge variant="soft">{positions.equities.length} open</Badge>
+            </Flex>
+            {positions.equities.length ? (
+              <div className="table-scroll">
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>Symbol</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Direction</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Quantity</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Avg. Buy Price</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Available</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {positions.equities.map((row, index) => (
+                      <Table.Row key={(row.symbol || "equity") + index}>
+                        <Table.Cell><Text weight="bold">{row.symbol || "—"}</Text></Table.Cell>
+                        <Table.Cell>{row.direction || "long"}</Table.Cell>
+                        <Table.Cell>{row.quantity ?? "—"}</Table.Cell>
+                        <Table.Cell>{row.average_buy_price ? money(Number(row.average_buy_price)) : "—"}</Table.Cell>
+                        <Table.Cell>{row.shares_available_for_sells ?? "—"}</Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+            ) : (
+              <Text color="gray" size="2">No equity positions.</Text>
+            )}
+          </Card>
+
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="4">
+              <Box>
+                <Heading size="4">Option Positions</Heading>
+                <Text size="2" color="gray">Open Robinhood option contracts</Text>
+              </Box>
+              <Badge variant="soft">{positions.options.length} open</Badge>
+            </Flex>
+            {positions.options.length ? (
+              <div className="table-scroll">
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>Symbol</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Direction</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Quantity</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Average Price</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Expiration</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {positions.options.map((row, index) => (
+                      <Table.Row key={(row.option_id || row.symbol || "option") + index}>
+                        <Table.Cell><Text weight="bold">{row.symbol || "—"}</Text></Table.Cell>
+                        <Table.Cell>{row.direction || "—"}</Table.Cell>
+                        <Table.Cell>{row.quantity ?? "—"}</Table.Cell>
+                        <Table.Cell>{row.average_price ? money(Number(row.average_price)) : "—"}</Table.Cell>
+                        <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+            ) : (
+              <Text color="gray" size="2">No option positions.</Text>
+            )}
+          </Card>
+        </Flex>
       );
     }
 
