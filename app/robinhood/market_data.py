@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.robinhood.client import RobinhoodTradingMCP
-from app.robinhood.normalize import extract_records, find_first_list
+from app.robinhood.normalize import extract_candidate_records, extract_records, find_first_list
 from app.robinhood.schema_args import build_arguments
 
 
@@ -64,7 +64,7 @@ class RobinhoodMarketDataService:
 
     @staticmethod
     def _chain_id(chains: Any) -> str | None:
-        rows = extract_records(chains)
+        rows = extract_records(chains) or extract_candidate_records(chains)
         for row in rows:
             value = _first_value(row, ("id", "chain_id", "option_chain_id"))
             if value:
@@ -74,7 +74,7 @@ class RobinhoodMarketDataService:
     @staticmethod
     def _option_ids(instruments: Any) -> list[str]:
         ids: list[str] = []
-        for row in extract_records(instruments):
+        for row in (extract_records(instruments) or extract_candidate_records(instruments)):
             value = _first_value(
                 row,
                 ("id", "option_id", "instrument_id", "option_instrument_id"),
@@ -85,8 +85,8 @@ class RobinhoodMarketDataService:
 
     @staticmethod
     def _normalize_contracts(instruments: Any, quotes: Any) -> list[dict[str, Any]]:
-        instrument_rows = extract_records(instruments)
-        quote_rows = extract_records(quotes)
+        instrument_rows = extract_records(instruments) or extract_candidate_records(instruments)
+        quote_rows = extract_records(quotes) or extract_candidate_records(quotes)
 
         quote_map: dict[str, dict[str, Any]] = {}
         for quote in quote_rows:
@@ -207,9 +207,9 @@ class RobinhoodMarketDataService:
         return OptionScanResult(
             symbol=symbol,
             scanned_at=datetime.now(timezone.utc).isoformat(),
-            chain_count=len(extract_records(chains)),
-            instrument_count=len(extract_records(instruments)),
-            quote_count=len(extract_records(quotes)),
+            chain_count=len(extract_records(chains) or extract_candidate_records(chains)),
+            instrument_count=len(extract_records(instruments) or extract_candidate_records(instruments)),
+            quote_count=len(extract_records(quotes) or extract_candidate_records(quotes)),
             contracts=self._normalize_contracts(instruments, quotes),
             tool_errors=errors,
         )
