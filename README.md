@@ -94,3 +94,68 @@ cd /opt/TradeHub
 git pull
 docker compose up -d --build
 ```
+
+
+## Robinhood authentication
+
+TradeHub uses Robinhood's official Trading MCP OAuth flow. OAuth state is stored
+inside the Docker volume `tradehub-secrets`; it is not stored in Git.
+
+Keep TradeHub in dry-run while connecting:
+
+```env
+TRADING_MODE=dry_run
+PHASE=0
+ROBINHOOD_MCP_ENABLED=false
+```
+
+Run the one-time interactive OAuth bootstrap:
+
+```bash
+cd /opt/TradeHub
+docker compose run --rm -it app python -m app.robinhood.auth_cli
+```
+
+The command prints a Robinhood authorization URL. Open it on a desktop browser,
+complete Robinhood authorization, then copy the full localhost callback URL from
+the browser address bar and paste it back into the terminal.
+
+After the command reports success, edit `.env`:
+
+```env
+ROBINHOOD_MCP_ENABLED=true
+TRADING_MODE=dry_run
+PHASE=0
+```
+
+Then rebuild/restart:
+
+```bash
+docker compose up -d --build
+docker compose logs -f app
+```
+
+Verify the read-only connection:
+
+```bash
+curl http://localhost:8787/api/robinhood/status
+curl -X POST http://localhost:8787/api/robinhood/sync
+```
+
+The background synchronizer only invokes Robinhood read tools. It does not call
+`review_option_order`, `place_option_order`, or `cancel_option_order`.
+
+### Read-sync data currently used by the dashboard
+
+- Robinhood account discovery
+- Agentic account identification
+- Portfolio total value
+- Buying power
+- Cash
+- Options value
+- Open equity position count
+- Open option position count
+- Open option order count
+
+P&L, full position detail, chains, quotes, Greeks, IV rank, and strategy scanning
+are the next read-only milestones.
