@@ -1,0 +1,380 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+  background: #080c13;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(31, 193, 113, 0.06), transparent 28rem),
+    #080c13;
+}
+
+body {
+  min-width: 320px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.radix-themes {
+  --default-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-background: #080c13;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 238px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 238px;
+  padding: 18px 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(7, 11, 17, 0.97);
+  backdrop-filter: blur(18px);
+  z-index: 20;
+}
+
+.brand {
+  padding: 8px 10px 24px;
+}
+
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  color: #07120c;
+  background: linear-gradient(145deg, #42e28c, #19a965);
+  box-shadow: 0 0 26px rgba(31, 193, 113, 0.24);
+}
+
+.brand-text h1,
+.brand-text h2,
+.brand-text h3,
+.brand-text h4 {
+  letter-spacing: -0.03em;
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nav-item {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--gray-10);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: 140ms ease;
+}
+
+.nav-item:hover {
+  color: var(--gray-12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nav-item.active {
+  color: var(--green-11);
+  border-color: rgba(31, 193, 113, 0.15);
+  background: linear-gradient(90deg, rgba(31, 193, 113, 0.14), rgba(31, 193, 113, 0.035));
+}
+
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  width: 3px;
+  height: 24px;
+  border-radius: 0 5px 5px 0;
+  background: var(--green-9);
+  box-shadow: 0 0 15px rgba(31, 193, 113, 0.55);
+}
+
+.nav-count {
+  min-width: 23px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #08140d;
+  background: var(--green-9);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workspace {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  min-height: 68px;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(8, 12, 19, 0.86);
+  backdrop-filter: blur(18px);
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(31, 193, 113, 0.32);
+  color: var(--green-11);
+  background: rgba(31, 193, 113, 0.12);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.content {
+  width: min(1560px, 100%);
+  margin: 0 auto;
+  padding: 30px 30px 54px;
+}
+
+.metric-card,
+.large-card {
+  border: 1px solid rgba(255, 255, 255, 0.075) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.014), rgba(255, 255, 255, 0)),
+    #0d131d !important;
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.metric-card {
+  min-height: 132px;
+  padding: 18px !important;
+}
+
+.large-card {
+  padding: 20px !important;
+}
+
+.section-grid {
+  margin-top: 18px;
+}
+
+.sparkline {
+  width: 112px;
+  height: 44px;
+  opacity: 0.9;
+}
+
+.positive {
+  color: var(--green-11);
+}
+
+.negative {
+  color: var(--red-10);
+}
+
+.limit-tile,
+.position-stat {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.empty-panel {
+  min-height: 238px;
+  padding: 24px;
+  border: 1px dashed rgba(255, 255, 255, 0.075);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at center, rgba(31, 193, 113, 0.03), transparent 56%),
+    rgba(255, 255, 255, 0.008);
+}
+
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: var(--green-11);
+  border: 1px solid rgba(31, 193, 113, 0.14);
+  background: rgba(31, 193, 113, 0.08);
+}
+
+.approval-card {
+  border: 1px solid rgba(31, 193, 113, 0.11) !important;
+  background: rgba(31, 193, 113, 0.025) !important;
+}
+
+.danger-card {
+  border-color: rgba(245, 158, 11, 0.25) !important;
+  background:
+    linear-gradient(90deg, rgba(245, 158, 11, 0.055), transparent),
+    #0d131d !important;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border-radius: 10px;
+}
+
+.table-scroll table {
+  min-width: 720px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    width: 78px;
+    padding-inline: 10px;
+  }
+
+  .brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .brand-text,
+  .nav-item span:not(.nav-count) {
+    display: none;
+  }
+
+  .nav-item {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .nav-count {
+    position: absolute;
+    top: 2px;
+    right: 1px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 9px;
+  }
+
+  .workspace {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    height: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 8px 10px;
+  }
+
+  .brand {
+    padding: 0 6px 0 0;
+    flex: 0 0 auto;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .nav-list {
+    display: flex;
+    flex-direction: row;
+    gap: 5px;
+  }
+
+  .nav-item {
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .sidebar > .rt-Separator,
+  .sidebar > button:last-child {
+    display: none;
+  }
+
+  .workspace {
+    min-width: 0;
+  }
+
+  .topbar {
+    position: static;
+    padding: 12px 16px;
+    align-items: flex-start;
+  }
+
+  .topbar > div:first-child {
+    max-width: 70%;
+  }
+
+  .content {
+    padding: 22px 16px 40px;
+  }
+
+  .sparkline {
+    display: none;
+  }
+
+  .metric-card {
+    min-height: 118px;
+  }
+}
