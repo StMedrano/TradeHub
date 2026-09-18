@@ -42,3 +42,16 @@ class UnderlyingPause(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+
+class TradeProposalDetail(Base):
+    __tablename__ = "trade_proposal_details"
+
+    proposal_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    candidate_key: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    option_id: Mapped[str] = mapped_column(String(128), index=True)
+    candidate_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
