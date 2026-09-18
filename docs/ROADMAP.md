@@ -16,13 +16,13 @@
 - [x] Tests and GitHub Actions
 
 ## Milestone 2 — authenticated Robinhood read path
-- [ ] OAuth/token persistence for the Robinhood MCP session
-- [ ] Account/balance normalization
-- [ ] Equity holdings and share counts
+- [x] OAuth/token persistence for the Robinhood MCP session
+- [x] Account/balance normalization
+- [~] Equity holdings sync (detail view still pending)
 - [ ] Option chains/instruments
 - [ ] Option quotes
-- [ ] Option positions
-- [ ] Open/historical orders
+- [~] Option positions sync (detail view still pending)
+- [~] Option order sync (history/detail view still pending)
 - [ ] Expiration calendar
 - [ ] Assignment/event detection
 
