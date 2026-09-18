@@ -203,3 +203,57 @@ async def robinhood_tools():
         }
     result = await robinhood.list_tools()
     return {"enabled": True, "result": str(result)}
+
+
+@router.get("/dashboard/summary")
+def dashboard_summary(db: Session = Depends(db_session)):
+    pending = db.scalars(
+        select(TradeProposal).where(TradeProposal.status == "pending_approval")
+    ).all()
+    active_pauses = db.scalars(
+        select(UnderlyingPause).where(UnderlyingPause.acknowledged.is_(False))
+    ).all()
+
+    # Account-value fields remain null until the authenticated Robinhood read path
+    # is enabled. The UI must never display fabricated brokerage values.
+    return {
+        "equity": None,
+        "buying_power": None,
+        "daily_pnl": None,
+        "daily_pnl_pct": None,
+        "total_pnl": None,
+        "open_risk": None,
+        "risk_utilization_pct": None,
+        "open_positions": 0,
+        "open_orders": 0,
+        "pending_approvals": len(pending),
+        "paused_underlyings": len(active_pauses),
+        "trading_mode": settings.trading_mode.value,
+        "phase": settings.phase,
+        "require_approval": settings.require_approval,
+        "robinhood_mcp_enabled": settings.robinhood_mcp_enabled,
+        "max_concurrent_positions": settings.max_concurrent_positions,
+        "max_trade_loss_pct": settings.max_trade_loss_pct,
+        "max_portfolio_loss_pct": settings.max_portfolio_loss_pct,
+        "daily_loss_breaker_pct": settings.daily_loss_breaker_pct,
+        "liquidity_max_spread_pct": settings.liquidity_max_spread_pct,
+        "system_status": "healthy",
+    }
+
+
+@router.get("/activity")
+def activity(db: Session = Depends(db_session)):
+    rows = db.scalars(
+        select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(100)
+    ).all()
+    return [
+        {
+            "id": x.id,
+            "event_type": x.event_type,
+            "severity": x.severity,
+            "underlying": x.underlying,
+            "message": x.message,
+            "created_at": x.created_at,
+        }
+        for x in rows
+    ]
