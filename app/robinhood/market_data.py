@@ -30,6 +30,20 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _quote_value(row: dict[str, Any], names: tuple[str, ...]) -> Any:
+    direct = _first_value(row, names)
+    if direct is not None:
+        return direct
+
+    for container_name in ("greeks", "market_data", "quote"):
+        nested = row.get(container_name)
+        if isinstance(nested, dict):
+            value = _first_value(nested, names)
+            if value is not None:
+                return value
+    return None
+
+
 def _quote_records(value: Any) -> list[dict[str, Any]]:
     rows = extract_records(value) or extract_candidate_records(value)
     quotes: list[dict[str, Any]] = []
@@ -175,9 +189,9 @@ class RobinhoodMarketDataService:
             )
             quote = quote_map.get(str(option_id), {}) if option_id else {}
 
-            bid = _as_float(_first_value(quote, ("bid_price", "bid", "bidPrice")))
-            ask = _as_float(_first_value(quote, ("ask_price", "ask", "askPrice")))
-            mark = _as_float(_first_value(quote, ("mark_price", "mark", "markPrice")))
+            bid = _as_float(_quote_value(quote, ("bid_price", "bid", "bidPrice")))
+            ask = _as_float(_quote_value(quote, ("ask_price", "ask", "askPrice")))
+            mark = _as_float(_quote_value(quote, ("mark_price", "mark", "markPrice")))
             iv = _as_float(
                 _first_value(
                     quote,
@@ -208,16 +222,16 @@ class RobinhoodMarketDataService:
                     "ask": ask,
                     "mark": mark,
                     "spread_pct": spread_pct,
-                    "volume": _first_value(quote, ("volume",)),
+                    "volume": _quote_value(quote, ("volume",)),
                     "open_interest": _first_value(
                         quote, ("open_interest", "openInterest")
                     ),
                     "implied_volatility": iv,
-                    "delta": _as_float(_first_value(quote, ("delta",))),
-                    "gamma": _as_float(_first_value(quote, ("gamma",))),
-                    "theta": _as_float(_first_value(quote, ("theta",))),
-                    "vega": _as_float(_first_value(quote, ("vega",))),
-                    "rho": _as_float(_first_value(quote, ("rho",))),
+                    "delta": _as_float(_quote_value(quote, ("delta",))),
+                    "gamma": _as_float(_quote_value(quote, ("gamma",))),
+                    "theta": _as_float(_quote_value(quote, ("theta",))),
+                    "vega": _as_float(_quote_value(quote, ("vega",))),
+                    "rho": _as_float(_quote_value(quote, ("rho",))),
                 }
             )
 
