@@ -416,6 +416,9 @@ export default function App() {
   const [activity, setActivity] = useState([]);
   const [positions, setPositions] = useState({ equities: [], options: [] });
   const [loading, setLoading] = useState(true);
+  const [scanSymbol, setScanSymbol] = useState("SPY");
+  const [scanResult, setScanResult] = useState(null);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
   const previousApprovals = useRef(0);
   const [dialog, setDialog] = useState({
@@ -529,6 +532,25 @@ export default function App() {
     }
   }
 
+  async function scanOptions() {
+    const symbol = scanSymbol.trim().toUpperCase();
+    if (!symbol) return;
+    setScanning(true);
+    try {
+      const response = await fetch("/api/opportunities/scan?symbol=" + encodeURIComponent(symbol));
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail || "Option scan failed.");
+      }
+      setScanResult(body);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Option scan failed.");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   function renderMain() {
     if (section === "overview") {
       return (
@@ -618,6 +640,141 @@ export default function App() {
             <ActivityTable activity={activity.slice(0, 6)} />
           </Card>
         </>
+      );
+    }
+
+    if (section === "opportunities") {
+      return (
+        <Flex direction="column" gap="4">
+          <Card className="large-card">
+            <Flex justify="between" align="end" gap="4" wrap="wrap">
+              <Box>
+                <Heading size="4">Read-only Option Scanner</Heading>
+                <Text size="2" color="gray">
+                  Loads live Robinhood chains, contracts, quotes, IV, and Greeks when available.
+                </Text>
+              </Box>
+              <Flex gap="2" align="center">
+                <TextField.Root
+                  value={scanSymbol}
+                  onChange={(e) => setScanSymbol(e.target.value.toUpperCase())}
+                  placeholder="SPY"
+                  style={{ width: 140 }}
+                />
+                <Button onClick={scanOptions} disabled={scanning || summary?.robinhood_connection_state !== "connected"}>
+                  {scanning ? <ReloadIcon className="spin" /> : <LightningBoltIcon />}
+                  {scanning ? "Scanning" : "Scan"}
+                </Button>
+              </Flex>
+            </Flex>
+
+            {summary?.robinhood_connection_state !== "connected" ? (
+              <Callout.Root color="amber" mt="4">
+                <Callout.Icon><ExclamationTriangleIcon /></Callout.Icon>
+                <Callout.Text>
+                  Robinhood read sync must be connected before market-data scans can run.
+                </Callout.Text>
+              </Callout.Root>
+            ) : null}
+          </Card>
+
+          {scanResult ? (
+            <>
+              <Grid columns={{ initial: "2", md: "4" }} gap="3">
+                <Box className="position-stat">
+                  <Text size="1" color="gray">Symbol</Text>
+                  <Heading size="5">{scanResult.symbol}</Heading>
+                </Box>
+                <Box className="position-stat">
+                  <Text size="1" color="gray">Chains</Text>
+                  <Heading size="5">{scanResult.chain_count}</Heading>
+                </Box>
+                <Box className="position-stat">
+                  <Text size="1" color="gray">Contracts</Text>
+                  <Heading size="5">{scanResult.instrument_count}</Heading>
+                </Box>
+                <Box className="position-stat">
+                  <Text size="1" color="gray">Quotes</Text>
+                  <Heading size="5">{scanResult.quote_count}</Heading>
+                </Box>
+              </Grid>
+
+              {Object.keys(scanResult.tool_errors || {}).length ? (
+                <Callout.Root color="amber">
+                  <Callout.Icon><ExclamationTriangleIcon /></Callout.Icon>
+                  <Callout.Text>
+                    Some Robinhood read tools could not be called with the current advertised schema. See Settings/tool schemas for details.
+                  </Callout.Text>
+                </Callout.Root>
+              ) : null}
+
+              <Card className="large-card">
+                <Flex justify="between" align="center" mb="4">
+                  <Box>
+                    <Heading size="4">Option Contracts</Heading>
+                    <Text size="2" color="gray">
+                      Sorted by quoted bid/ask spread only. No trade recommendation is being made.
+                    </Text>
+                  </Box>
+                  <Badge color="green" variant="soft">READ ONLY</Badge>
+                </Flex>
+
+                {scanResult.contracts?.length ? (
+                  <div className="table-scroll">
+                    <Table.Root variant="surface">
+                      <Table.Header>
+                        <Table.Row>
+                          <Table.ColumnHeaderCell>Expiry</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Type</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Strike</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Bid</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Ask</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Spread</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>IV</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Delta</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Theta</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>OI</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Volume</Table.ColumnHeaderCell>
+                        </Table.Row>
+                      </Table.Header>
+                      <Table.Body>
+                        {scanResult.contracts.slice(0, 100).map((row, index) => (
+                          <Table.Row key={(row.option_id || "contract") + index}>
+                            <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                            <Table.Cell>{row.option_type || "—"}</Table.Cell>
+                            <Table.Cell>{row.strike_price || "—"}</Table.Cell>
+                            <Table.Cell>{row.bid == null ? "—" : money(row.bid)}</Table.Cell>
+                            <Table.Cell>{row.ask == null ? "—" : money(row.ask)}</Table.Cell>
+                            <Table.Cell>{row.spread_pct == null ? "—" : pct(row.spread_pct)}</Table.Cell>
+                            <Table.Cell>{row.implied_volatility == null ? "—" : pct(row.implied_volatility * (row.implied_volatility <= 5 ? 100 : 1))}</Table.Cell>
+                            <Table.Cell>{row.delta ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.theta ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.open_interest ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.volume ?? "—"}</Table.Cell>
+                          </Table.Row>
+                        ))}
+                      </Table.Body>
+                    </Table.Root>
+                  </div>
+                ) : (
+                  <EmptyPanel
+                    icon={LightningBoltIcon}
+                    title="No option contracts returned"
+                    body="The live Robinhood schemas may require a field TradeHub could not safely infer, or the symbol has no returned contracts."
+                  />
+                )}
+              </Card>
+            </>
+          ) : (
+            <Card className="large-card">
+              <EmptyPanel
+                icon={LightningBoltIcon}
+                title="Scan a symbol"
+                body="Enter an underlying symbol to inspect Robinhood option-chain data. This scanner is informational and cannot submit orders."
+              />
+            </Card>
+          )}
+        </Flex>
       );
     }
 
