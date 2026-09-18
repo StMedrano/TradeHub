@@ -11,6 +11,7 @@ from app.domain.models import AccountRiskSnapshot, RiskPolicy, TradeIntent
 from app.persistence.models import AuditEvent, TradeProposal, UnderlyingPause
 from app.risk.manager import RiskManager
 from app.robinhood.client import RobinhoodTradingMCP
+from app.robinhood.read_service import robinhood_read_service
 
 router = APIRouter(prefix="/api")
 risk_manager = RiskManager()
@@ -214,24 +215,31 @@ def dashboard_summary(db: Session = Depends(db_session)):
         select(UnderlyingPause).where(UnderlyingPause.acknowledged.is_(False))
     ).all()
 
-    # Account-value fields remain null until the authenticated Robinhood read path
-    # is enabled. The UI must never display fabricated brokerage values.
+    snapshot = robinhood_read_service.snapshot
+
+    # Brokerage values come only from the authenticated Robinhood MCP read path.
+    # Unsynced fields remain null rather than being simulated.
     return {
-        "equity": None,
-        "buying_power": None,
+        "equity": snapshot.equity,
+        "buying_power": snapshot.buying_power,
+        "cash": snapshot.cash,
+        "options_value": snapshot.options_value,
         "daily_pnl": None,
         "daily_pnl_pct": None,
         "total_pnl": None,
         "open_risk": None,
         "risk_utilization_pct": None,
-        "open_positions": 0,
-        "open_orders": 0,
+        "open_positions": snapshot.open_positions,
+        "open_orders": snapshot.open_orders,
         "pending_approvals": len(pending),
         "paused_underlyings": len(active_pauses),
         "trading_mode": settings.trading_mode.value,
         "phase": settings.phase,
         "require_approval": settings.require_approval,
         "robinhood_mcp_enabled": settings.robinhood_mcp_enabled,
+        "robinhood_connection_state": snapshot.connection_state,
+        "robinhood_last_sync": snapshot.last_sync,
+        "robinhood_last_error": snapshot.last_error,
         "max_concurrent_positions": settings.max_concurrent_positions,
         "max_trade_loss_pct": settings.max_trade_loss_pct,
         "max_portfolio_loss_pct": settings.max_portfolio_loss_pct,
@@ -257,3 +265,36 @@ def activity(db: Session = Depends(db_session)):
         }
         for x in rows
     ]
+
+
+
+@router.get("/robinhood/status")
+def robinhood_status():
+    snapshot = robinhood_read_service.snapshot
+    return {
+        "enabled": settings.robinhood_mcp_enabled,
+        "auth_state_present": robinhood.auth_state_exists(),
+        "connection_state": snapshot.connection_state,
+        "last_sync": snapshot.last_sync,
+        "last_error": snapshot.last_error,
+        "tool_errors": snapshot.tool_errors,
+        "open_equity_positions": snapshot.open_equity_positions,
+        "open_option_positions": snapshot.open_option_positions,
+        "open_orders": snapshot.open_orders,
+    }
+
+
+@router.post("/robinhood/sync")
+async def robinhood_sync():
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(
+            409,
+            "Robinhood MCP is disabled. Authenticate first and enable it in .env.",
+        )
+    snapshot = await robinhood_read_service.sync_once()
+    return {
+        "connection_state": snapshot.connection_state,
+        "last_sync": snapshot.last_sync,
+        "last_error": snapshot.last_error,
+        "tool_errors": snapshot.tool_errors,
+    }
