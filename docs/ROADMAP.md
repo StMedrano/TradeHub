@@ -29,10 +29,10 @@
 ## Milestone 3 — strategy engine
 - [ ] IV rank/percentile input
 - [ ] Directional signal interface
-- [ ] Liquidity gate
-- [ ] Covered-call preference when sufficient shares exist
-- [ ] CSP candidate plugin
-- [ ] Covered-call plugin
+- [x] Liquidity gate for Phase 1 candidate screening
+- [x] Covered-call preference when sufficient shares exist
+- [x] CSP candidate plugin (dry-run candidate only)
+- [x] Covered-call plugin (dry-run candidate only)
 - [ ] Long call/put plugin
 - [ ] Debit spread plugin
 - [ ] Bull put/bear call plugin
