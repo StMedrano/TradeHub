@@ -418,6 +418,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [scanSymbol, setScanSymbol] = useState("SPY");
   const [scanResult, setScanResult] = useState(null);
+  const [candidateResult, setCandidateResult] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
   const previousApprovals = useRef(0);
@@ -537,12 +538,25 @@ export default function App() {
     if (!symbol) return;
     setScanning(true);
     try {
-      const response = await fetch("/api/opportunities/scan?symbol=" + encodeURIComponent(symbol));
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body.detail || "Option scan failed.");
+      const [scanResponse, candidateResponse] = await Promise.all([
+        fetch("/api/opportunities/scan?symbol=" + encodeURIComponent(symbol)),
+        fetch("/api/opportunities/candidates?symbol=" + encodeURIComponent(symbol))
+      ]);
+
+      const [scanBody, candidateBody] = await Promise.all([
+        scanResponse.json(),
+        candidateResponse.json()
+      ]);
+
+      if (!scanResponse.ok) {
+        throw new Error(scanBody.detail || "Option scan failed.");
       }
-      setScanResult(body);
+      if (!candidateResponse.ok) {
+        throw new Error(candidateBody.detail || "Candidate scan failed.");
+      }
+
+      setScanResult(scanBody);
+      setCandidateResult(candidateBody);
       setError("");
     } catch (err) {
       setError(err.message || "Option scan failed.");
@@ -707,6 +721,80 @@ export default function App() {
                   </Callout.Text>
                 </Callout.Root>
               ) : null}
+
+              <Card className="large-card">
+                <Flex justify="between" align="center" mb="4">
+                  <Box>
+                    <Heading size="4">Phase 1 Candidates</Heading>
+                    <Text size="2" color="gray">
+                      Mechanical covered-call/CSP screening only. Candidates are not approval-ready trades.
+                    </Text>
+                  </Box>
+                  <Badge color="amber" variant="soft">PORTFOLIO RISK PENDING</Badge>
+                </Flex>
+
+                {candidateResult?.candidates?.length ? (
+                  <div className="table-scroll">
+                    <Table.Root variant="surface">
+                      <Table.Header>
+                        <Table.Row>
+                          <Table.ColumnHeaderCell>Strategy</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Expiry</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>DTE</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Strike</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Delta</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Spread</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>OI</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Volume</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Credit</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Collateral</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Score</Table.ColumnHeaderCell>
+                          <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
+                        </Table.Row>
+                      </Table.Header>
+                      <Table.Body>
+                        {candidateResult.candidates.map((row, index) => (
+                          <Table.Row key={(row.option_id || row.strategy) + index}>
+                            <Table.Cell>
+                              <Badge variant="soft" color={row.strategy === "covered_call" ? "green" : "blue"}>
+                                {row.strategy.replaceAll("_", " ")}
+                              </Badge>
+                            </Table.Cell>
+                            <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                            <Table.Cell>{row.dte ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.strike_price ? money(Number(row.strike_price)) : "—"}</Table.Cell>
+                            <Table.Cell>{row.delta ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.spread_pct == null ? "—" : pct(row.spread_pct)}</Table.Cell>
+                            <Table.Cell>{row.open_interest ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.volume ?? "—"}</Table.Cell>
+                            <Table.Cell>{row.estimated_credit ? money(Number(row.estimated_credit)) : "—"}</Table.Cell>
+                            <Table.Cell>{row.estimated_collateral ? money(Number(row.estimated_collateral)) : "—"}</Table.Cell>
+                            <Table.Cell>{row.score.toFixed(1)}</Table.Cell>
+                            <Table.Cell>
+                              <Badge color={row.risk_status === "buying_power_reject" ? "red" : "amber"} variant="soft">
+                                {row.risk_status.replaceAll("_", " ")}
+                              </Badge>
+                            </Table.Cell>
+                          </Table.Row>
+                        ))}
+                      </Table.Body>
+                    </Table.Root>
+                  </div>
+                ) : (
+                  <EmptyPanel
+                    icon={MixerHorizontalIcon}
+                    title="No Phase 1 candidates passed"
+                    body="No covered-call or CSP contracts met the configured DTE, liquidity, delta, coverage, and collateral filters."
+                  />
+                )}
+
+                {candidateResult ? (
+                  <Callout.Root color="amber" mt="4">
+                    <Callout.Icon><LockClosedIcon /></Callout.Icon>
+                    <Callout.Text>{candidateResult.note}</Callout.Text>
+                  </Callout.Root>
+                ) : null}
+              </Card>
 
               <Card className="large-card">
                 <Flex justify="between" align="center" mb="4">
