@@ -36,6 +36,37 @@ def _is_transient_mcp_error(exc: BaseException) -> bool:
     )
 
 
+def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
+    value = find_first_number(
+        payload,
+        (
+            "total_realized_gain",
+            "total_realized_pnl",
+            "realized_pnl",
+            "realized_gain",
+            "realized_pl",
+            "realized_profit_loss",
+            "net_realized_pnl",
+            "profit_loss",
+            "pnl",
+            "amount",
+            "total",
+        ),
+    )
+    if value is not None:
+        return value, True
+
+    data_section = (
+        payload.get("data")
+        if isinstance(payload, dict) and "data" in payload
+        else payload
+    )
+    if is_effectively_empty(data_section):
+        return 0.0, True
+
+    return None, False
+
+
 @dataclass
 class RobinhoodSnapshot:
     connection_state: str = "disabled"
@@ -211,36 +242,9 @@ class RobinhoodReadService:
                 )
                 realized_payload = await self.client.call("get_realized_pnl", pnl_args)
                 realized_pnl_shape = payload_shape(realized_payload)
-                realized_pnl = find_first_number(
-                    realized_payload,
-                    (
-                        "total_realized_gain",
-                        "total_realized_pnl",
-                        "realized_pnl",
-                        "realized_gain",
-                        "realized_pl",
-                        "realized_profit_loss",
-                        "net_realized_pnl",
-                        "profit_loss",
-                        "pnl",
-                        "amount",
-                        "total",
-                    ),
+                realized_pnl, realized_pnl_authoritative = _parse_realized_pnl(
+                    realized_payload
                 )
-                if realized_pnl is not None:
-                    realized_pnl_authoritative = True
-                else:
-                    data_section = (
-                        realized_payload.get("data")
-                        if isinstance(realized_payload, dict) and "data" in realized_payload
-                        else realized_payload
-                    )
-                    if is_effectively_empty(data_section):
-                        # Robinhood can return a non-empty guide wrapper with
-                        # an empty data payload when there are no realized
-                        # trades in the requested same-day span.
-                        realized_pnl = 0.0
-                        realized_pnl_authoritative = True
         except Exception as exc:
             tool_errors["get_realized_pnl"] = _exception_message(exc)
 
