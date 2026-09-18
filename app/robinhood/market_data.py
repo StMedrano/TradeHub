@@ -118,7 +118,7 @@ class RobinhoodMarketDataService:
             if bid is not None and ask is not None and ask >= bid:
                 midpoint = (bid + ask) / 2
                 if midpoint > 0:
-                    spread_pct = ((ask - bid) / midpoint) * 100
+                    spread_pct = round(((ask - bid) / midpoint) * 100, 4)
 
             contracts.append(
                 {
