@@ -154,7 +154,7 @@ def extract_candidate_records(value: Any) -> list[dict[str, Any]]:
 
 
 
-def payload_shape(value: Any, depth: int = 0, max_depth: int = 3) -> Any:
+def payload_shape(value: Any, depth: int = 0, max_depth: int = 5) -> Any:
     """Return structure metadata only; never return payload values."""
     if depth >= max_depth:
         if isinstance(value, list):
