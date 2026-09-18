@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     daily_loss_breaker_pct: float = Field(default=0.10, gt=0, le=1)
 
     liquidity_max_spread_pct: float = Field(default=0.12, gt=0, le=1)
+    strategy_min_open_interest: int = Field(default=100, ge=0)
+    strategy_min_volume: int = Field(default=10, ge=0)
+    strategy_min_dte: int = Field(default=14, ge=0, le=3650)
+    strategy_max_dte: int = Field(default=60, ge=1, le=3650)
+    strategy_short_delta_min: float = Field(default=0.15, ge=0, le=1)
+    strategy_short_delta_max: float = Field(default=0.35, ge=0, le=1)
     entry_timeout_seconds: int = Field(default=90, ge=1)
     price_walk_increment: float = Field(default=0.01, gt=0)
     max_slippage_pct: float = Field(default=0.08, ge=0, le=1)
