@@ -56,6 +56,28 @@ def _shares_for_symbol(snapshot: RobinhoodSnapshot, symbol: str) -> int:
 
 
 @dataclass(frozen=True)
+class CandidateDiagnostic:
+    option_id: str | None
+    option_type: str | None
+    expiration_date: str | None
+    strike_price: Any
+    passed: bool
+    reasons: tuple[str, ...]
+    score: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "option_id": self.option_id,
+            "option_type": self.option_type,
+            "expiration_date": self.expiration_date,
+            "strike_price": self.strike_price,
+            "passed": self.passed,
+            "reasons": list(self.reasons),
+            "score": self.score,
+        }
+
+
+@dataclass(frozen=True)
 class StrategyCandidate:
     symbol: str
     strategy: str
@@ -202,6 +224,48 @@ class PhaseOneCandidateEngine:
             ),
             1,
         )
+
+    def diagnose(
+        self,
+        scan: OptionScanResult,
+        snapshot: RobinhoodSnapshot,
+    ) -> list[CandidateDiagnostic]:
+        symbol = scan.symbol.upper()
+        shares = _shares_for_symbol(snapshot, symbol)
+        has_cover = shares >= 100
+        diagnostics: list[CandidateDiagnostic] = []
+
+        for row in scan.contracts:
+            passed, reasons, _ = self._base_filters(row)
+            option_type = str(row.get("option_type") or "").lower()
+            extra = list(reasons)
+
+            if passed:
+                if option_type == "call" and not has_cover:
+                    extra.append(
+                        "Covered call requires at least 100 owned shares."
+                    )
+                elif option_type == "put" and has_cover:
+                    extra.append(
+                        "Covered calls are preferred while sufficient shares are owned."
+                    )
+                elif option_type not in {"call", "put"}:
+                    extra.append("Option type is not supported by Phase 1.")
+
+            diagnostics.append(
+                CandidateDiagnostic(
+                    option_id=row.get("option_id"),
+                    option_type=option_type or None,
+                    expiration_date=row.get("expiration_date"),
+                    strike_price=row.get("strike_price"),
+                    passed=not extra,
+                    reasons=tuple(extra),
+                    score=self._score(row),
+                )
+            )
+
+        diagnostics.sort(key=lambda item: (-item.score, item.expiration_date or ""))
+        return diagnostics
 
     def generate(
         self,
