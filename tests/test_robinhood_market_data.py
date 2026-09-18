@@ -76,8 +76,10 @@ def test_normalize_contracts_unwraps_quote_wrapper():
                         "bid_price": "4.80",
                         "ask_price": "5.20",
                         "implied_volatility": "0.22",
-                        "delta": "-0.24",
-                        "theta": "-0.05",
+                        "greeks": {
+                            "delta": "-0.24",
+                            "theta": "-0.05"
+                        },
                         "open_interest": 850,
                         "volume": 120,
                     }
