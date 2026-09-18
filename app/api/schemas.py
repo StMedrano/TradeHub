@@ -23,3 +23,9 @@ class ApprovalAction(BaseModel):
 
 class PauseAck(BaseModel):
     actor: str = Field(min_length=1, max_length=128)
+
+
+
+class CandidatePromotionRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=16)
+    option_id: str = Field(min_length=1, max_length=128)
