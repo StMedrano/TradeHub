@@ -86,6 +86,20 @@ class RobinhoodTradingMCP:
             async with Client(transport) as client:
                 return await client.list_tools()
 
+    async def tool_catalog(self) -> dict[str, dict[str, Any]]:
+        result = await self.list_tools()
+        catalog: dict[str, dict[str, Any]] = {}
+        for tool in result.tools:
+            schema = getattr(tool, "inputSchema", None)
+            if schema is None:
+                schema = getattr(tool, "input_schema", None)
+            catalog[tool.name] = {
+                "name": tool.name,
+                "description": getattr(tool, "description", None),
+                "input_schema": schema or {},
+            }
+        return catalog
+
     async def accounts(self) -> Any:
         return await self.call("get_accounts", {})
 
