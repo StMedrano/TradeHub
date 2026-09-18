@@ -50,3 +50,18 @@ def test_build_arguments_refuses_missing_required_fields():
 
     with pytest.raises(ValueError, match="account_number"):
         build_arguments(schema, {"symbol": "SPY"})
+
+
+
+def test_build_arguments_passes_span_when_live_schema_advertises_it():
+    schema = {
+        "type": "object",
+        "properties": {
+            "span": {
+                "type": "string",
+                "enum": ["day", "week", "month", "3month"],
+            }
+        },
+    }
+
+    assert build_arguments(schema, {"span": "day"}) == {"span": "day"}
