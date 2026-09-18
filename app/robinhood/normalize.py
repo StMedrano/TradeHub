@@ -73,12 +73,8 @@ def find_first_list(value: Any, keys: tuple[str, ...]) -> list[Any] | None:
 def count_records(value: Any) -> int:
     if isinstance(value, list):
         return len(value)
-    if isinstance(value, dict):
-        for key in ("results", "positions", "orders", "items", "data"):
-            child = value.get(key)
-            if isinstance(child, list):
-                return len(child)
-    return 0
+    rows = find_first_list(value, ("results", "positions", "orders", "items"))
+    return len(rows) if rows is not None else 0
 
 
 
