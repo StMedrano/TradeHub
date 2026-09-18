@@ -247,8 +247,21 @@ function RiskPanel({ summary }) {
           <Heading size="4">Risk &amp; Limits</Heading>
           <Text size="2" color="gray">Hard controls checked before every order</Text>
         </Box>
-        <Badge color="green" variant="soft"><LockClosedIcon /> Enforced</Badge>
+        <Badge
+          color={summary?.portfolio_risk_authoritative ? "green" : "amber"}
+          variant="soft"
+        >
+          <LockClosedIcon />
+          {summary?.portfolio_risk_authoritative ? "Authoritative" : "Pending Reconstruction"}
+        </Badge>
       </Flex>
+
+      {!summary?.portfolio_risk_authoritative && summary?.portfolio_risk_reasons?.length ? (
+        <Callout.Root color="amber" mb="4">
+          <Callout.Icon><ExclamationTriangleIcon /></Callout.Icon>
+          <Callout.Text>{summary.portfolio_risk_reasons.join(" · ")}</Callout.Text>
+        </Callout.Root>
+      ) : null}
 
       <Grid columns={{ initial: "1", md: "2" }} gap="5">
         <Box>
