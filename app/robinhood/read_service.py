@@ -13,6 +13,14 @@ from app.robinhood.schema_args import build_arguments
 OPEN_ORDER_STATES = {"queued", "confirmed", "partially_filled", "pending", "open"}
 
 
+def _exception_message(exc: BaseException) -> str:
+    if isinstance(exc, BaseExceptionGroup):
+        parts = [_exception_message(child) for child in exc.exceptions]
+        parts = [part for part in parts if part]
+        return " | ".join(parts) if parts else str(exc)
+    return str(exc)
+
+
 @dataclass
 class RobinhoodSnapshot:
     connection_state: str = "disabled"
@@ -129,13 +137,13 @@ class RobinhoodReadService:
             return self.snapshot
         except Exception as exc:
             account_number = None
-            tool_errors["get_accounts"] = str(exc)
+            tool_errors["get_accounts"] = _exception_message(exc)
 
         async def read_tool(name: str) -> Any:
             try:
                 return await self._read(name, account_number=account_number)
             except Exception as exc:
-                tool_errors[name] = str(exc)
+                tool_errors[name] = _exception_message(exc)
                 return None
 
         portfolio = await read_tool("get_portfolio")
@@ -181,7 +189,7 @@ class RobinhoodReadService:
                     realized_pnl = 0.0
                     realized_pnl_authoritative = True
         except Exception as exc:
-            tool_errors["get_realized_pnl"] = str(exc)
+            tool_errors["get_realized_pnl"] = _exception_message(exc)
 
         equity = find_first_number(
             portfolio,
