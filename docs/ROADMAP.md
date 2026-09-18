@@ -27,6 +27,10 @@
 - [ ] Assignment/event detection
 
 ## Milestone 3 — strategy engine
+- [x] Authoritative server-side Phase 1 risk state when no option exposure/orders are open
+- [x] Daily realized-P&L read gate for circuit-breaker decisions
+- [x] Dry-run CSP promotion into approval queue
+- [x] Candidate pass/fail diagnostics
 - [ ] IV rank/percentile input
 - [ ] Directional signal interface
 - [x] Liquidity gate for Phase 1 candidate screening
