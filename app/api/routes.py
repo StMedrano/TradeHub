@@ -765,10 +765,7 @@ async def account_fit_opportunities(
             "Robinhood read connection is not ready. Complete OAuth and sync first.",
         )
 
-    risk_state = portfolio_risk_state_service.build(
-        db,
-        robinhood_read_service.snapshot,
-    )
+    risk_state = _effective_risk_state(db)
     if not risk_state.authoritative or risk_state.snapshot is None:
         raise HTTPException(
             409,
@@ -779,9 +776,10 @@ async def account_fit_opportunities(
         )
 
     policy = current_policy()
+    strategy_snapshot = _strategy_account_snapshot(risk_state.snapshot)
     capacity = _account_csp_capacity(
         risk_state.snapshot,
-        robinhood_read_service.snapshot.buying_power,
+        strategy_snapshot.buying_power,
         policy,
     )
     matches: list[dict[str, object]] = []
@@ -802,7 +800,7 @@ async def account_fit_opportunities(
 
         candidates = phase_one_candidate_engine.generate(
             scan,
-            robinhood_read_service.snapshot,
+            strategy_snapshot,
         )
 
         generated_csps = 0
@@ -896,6 +894,8 @@ async def account_fit_opportunities(
     return {
         "symbols": requested_symbols,
         "portfolio_risk_authoritative": risk_state.authoritative,
+        "risk_capital_mode": _risk_mode_label(),
+        "simulation_capital": settings.simulation_capital if _using_simulation() else None,
         "account_capacity": capacity,
         "mechanical_matches": matches,
         "match_count": len(matches),
@@ -903,7 +903,7 @@ async def account_fit_opportunities(
         "execution_enabled": False,
         "trading_mode": settings.trading_mode.value,
         "note": (
-            "These are mechanical CSP matches that fit synchronized buying power "
+            "These are mechanical CSP matches that fit the active risk-capital mode "
             "and current TradeHub risk rules. They are not investment recommendations."
         ),
     }
