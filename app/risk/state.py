@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.models import AccountRiskSnapshot
-from app.persistence.models import TradeProposal, UnderlyingPause
+from app.persistence.models import SimulationPosition, TradeProposal, UnderlyingPause
 from app.robinhood.read_service import RobinhoodSnapshot
 
 
@@ -122,8 +122,17 @@ class SimulationRiskStateService:
             )
         ).all()
 
+        open_positions = db.scalars(
+            select(SimulationPosition).where(
+                SimulationPosition.status == "open"
+            )
+        ).all()
+
         open_position_max_loss = sum(
             (Decimal(str(row.known_max_loss)) for row in active_proposals),
+            Decimal("0"),
+        ) + sum(
+            (Decimal(str(row.known_max_loss)) for row in open_positions),
             Decimal("0"),
         )
 
@@ -147,7 +156,7 @@ class SimulationRiskStateService:
                 equity=capital,
                 open_position_max_loss=open_position_max_loss,
                 realized_pnl_today=Decimal("0"),
-                concurrent_positions=len(active_proposals),
+                concurrent_positions=len(active_proposals) + len(open_positions),
                 paused_underlyings=paused,
             ),
             reasons=(),
