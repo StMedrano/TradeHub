@@ -59,6 +59,58 @@ def _watchlist_symbols(raw: str | None) -> list[str]:
     return values
 
 
+def _account_csp_capacity(
+    risk_snapshot: AccountRiskSnapshot,
+    buying_power: float | None,
+    policy: RiskPolicy,
+) -> dict[str, object]:
+    equity = max(risk_snapshot.equity, Decimal("0"))
+    trade_limit = equity * policy.max_trade_loss_pct
+    portfolio_limit = equity * policy.max_portfolio_loss_pct
+    remaining_portfolio = max(
+        portfolio_limit - risk_snapshot.open_position_max_loss,
+        Decimal("0"),
+    )
+    bp_limit = (
+        Decimal(str(buying_power))
+        if buying_power is not None
+        else None
+    )
+
+    limits: list[tuple[str, Decimal]] = [
+        ("per_trade_risk", trade_limit),
+        ("remaining_portfolio_risk", remaining_portfolio),
+    ]
+    if bp_limit is not None:
+        limits.append(("buying_power", max(bp_limit, Decimal("0"))))
+
+    binding_name, binding_limit = min(limits, key=lambda item: item[1])
+    approximate_max_strike = binding_limit / Decimal("100")
+
+    return {
+        "account_equity": str(equity),
+        "synchronized_buying_power": (
+            str(bp_limit) if bp_limit is not None else None
+        ),
+        "per_trade_loss_limit": str(trade_limit),
+        "portfolio_loss_limit": str(portfolio_limit),
+        "open_position_max_loss": str(risk_snapshot.open_position_max_loss),
+        "remaining_portfolio_loss_capacity": str(remaining_portfolio),
+        "binding_constraint": binding_name,
+        "max_csp_collateral": str(binding_limit),
+        "approximate_max_csp_strike_before_premium": str(
+            approximate_max_strike.quantize(Decimal("0.01"))
+        ),
+        "contracts_assumed": 1,
+        "multiplier_assumed": 100,
+        "note": (
+            "Approximate max strike is a screening ceiling only. Actual CSP "
+            "collateral is reduced by premium received and every candidate still "
+            "must pass the full TradeHub risk evaluation."
+        ),
+    }
+
+
 def current_policy() -> RiskPolicy:
     return RiskPolicy(
         max_trade_loss_pct=Decimal(str(settings.max_trade_loss_pct)),
@@ -674,6 +726,11 @@ async def account_fit_opportunities(
         )
 
     policy = current_policy()
+    capacity = _account_csp_capacity(
+        risk_state.snapshot,
+        robinhood_read_service.snapshot.buying_power,
+        policy,
+    )
     matches: list[dict[str, object]] = []
     scanned: list[dict[str, object]] = []
 
@@ -786,6 +843,7 @@ async def account_fit_opportunities(
     return {
         "symbols": requested_symbols,
         "portfolio_risk_authoritative": risk_state.authoritative,
+        "account_capacity": capacity,
         "mechanical_matches": matches,
         "match_count": len(matches),
         "scan_summary": scanned,
