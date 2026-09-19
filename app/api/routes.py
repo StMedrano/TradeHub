@@ -423,6 +423,10 @@ async def scan_option_opportunities(symbol: str):
 async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
     if not settings.robinhood_mcp_enabled:
         raise HTTPException(409, "Robinhood MCP is disabled.")
+
+    # Risk decisions must use a fresh account/P&L snapshot, not merely the
+    # background-sync cache.
+    await robinhood_read_service.sync_once()
     if robinhood_read_service.snapshot.connection_state not in {
         "connected",
         "degraded",
@@ -540,6 +544,10 @@ async def promote_phase_one_candidate(
     """
     if not settings.robinhood_mcp_enabled:
         raise HTTPException(409, "Robinhood MCP is disabled.")
+
+    # Refresh authoritative account state immediately before any promotion
+    # risk decision. This endpoint still never calls a Robinhood write tool.
+    await robinhood_read_service.sync_once()
 
     symbol = body.symbol.strip().upper()
     candidate_key = f"{symbol}:{body.option_id}"
