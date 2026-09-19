@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
@@ -55,3 +55,26 @@ class TradeProposalDetail(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+
+class SimulationPosition(Base):
+    __tablename__ = "simulation_positions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    underlying: Mapped[str] = mapped_column(String(16), index=True)
+    strategy: Mapped[str] = mapped_column(String(32))
+    option_id: Mapped[str] = mapped_column(String(128), index=True)
+    contracts: Mapped[int] = mapped_column(Integer)
+    strike_price: Mapped[float] = mapped_column(Numeric(18, 4))
+    expiration_date: Mapped[str] = mapped_column(String(16))
+    entry_credit: Mapped[float] = mapped_column(Numeric(18, 4))
+    known_max_loss: Mapped[float] = mapped_column(Numeric(18, 4))
+    status: Mapped[str] = mapped_column(String(32), default="open", index=True)
+    exit_debit: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    realized_pnl: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
