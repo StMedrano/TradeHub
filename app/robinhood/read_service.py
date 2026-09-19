@@ -37,24 +37,28 @@ def _is_transient_mcp_error(exc: BaseException) -> bool:
 
 
 def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
-    value = find_first_number(
-        payload,
-        (
-            "total_realized_gain",
-            "total_realized_pnl",
-            "realized_pnl",
-            "realized_gain",
-            "realized_pl",
-            "realized_profit_loss",
-            "net_realized_pnl",
-            "profit_loss",
-            "pnl",
-            "amount",
-            "total",
-        ),
+    explicit_total_keys = (
+        "total_realized_gain_loss",
+        "total_realized_pnl",
+        "total_realized_gain",
+        "net_realized_pnl",
     )
-    if value is not None:
-        return value, True
+    component_keys = (
+        "realized_gain_loss",
+        "realized_pnl",
+        "realized_gain",
+        "realized_pl",
+        "realized_profit_loss",
+        "profit_loss",
+        "pnl",
+        "gain_loss",
+        "amount",
+    )
+
+    # Prefer a server-provided aggregate if one exists anywhere in the payload.
+    total = find_first_number(payload, explicit_total_keys)
+    if total is not None:
+        return total, True
 
     data_section = (
         payload.get("data")
@@ -63,6 +67,28 @@ def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
     )
     if is_effectively_empty(data_section):
         return 0.0, True
+
+    # Robinhood documents realized P&L as broken down by asset class. Sum one
+    # realized value per result row when no explicit aggregate is provided.
+    rows = find_first_list(
+        data_section,
+        ("results", "asset_classes", "breakdown", "items"),
+    )
+    if rows:
+        values: list[float] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            value = find_first_number(row, component_keys)
+            if value is not None:
+                values.append(value)
+        if values:
+            return float(sum(values)), True
+
+    # Fall back to a single recognized component when the payload is not list-shaped.
+    value = find_first_number(data_section, component_keys)
+    if value is not None:
+        return value, True
 
     return None, False
 
