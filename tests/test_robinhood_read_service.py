@@ -1,3 +1,4 @@
+import asyncio
 from app.robinhood.read_service import (
     RobinhoodReadService,
     _load_persisted_account_number,
@@ -204,3 +205,29 @@ def test_scoped_trade_history_no_trades_is_authoritative_zero():
     )
     assert value == 0.0
     assert authoritative is True
+
+
+
+def test_transient_pnl_read_retries_once():
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def call(self, tool_name, arguments):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("SSE stream ended without a response")
+            return {"data": {"total_returns": "0.00"}}
+
+    client = FakeClient()
+    service = RobinhoodReadService(client=client)
+
+    result = asyncio.run(
+        service._call_read_with_retry(
+            "get_realized_pnl",
+            {"account_number": "redacted"},
+        )
+    )
+
+    assert client.calls == 2
+    assert result == {"data": {"total_returns": "0.00"}}
