@@ -466,29 +466,133 @@ class MarketScanRun(Base):
     config_json: Mapped[str] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), ...)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class MarketScanSymbol(Base):
+    __tablename__ = "market_scan_symbols"
+    __table_args__ = (
+        UniqueConstraint("run_id", "symbol", name="uq_market_scan_run_symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    source_slice: Mapped[str] = mapped_column(String(128))
+    watchlist_priority: Mapped[bool] = mapped_column(Boolean, default=False)
+    equity_screen_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    equity_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
+    earnings_status: Mapped[str] = mapped_column(String(32), default="unknown")
+    option_scan_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    market_filter_passes: Mapped[int] = mapped_column(Integer, default=0)
+    mechanical_match_count: Mapped[int] = mapped_column(Integer, default=0)
+    near_miss_count: Mapped[int] = mapped_column(Integer, default=0)
+    tool_errors_json: Mapped[str] = mapped_column(Text, default="{}")
+    consecutive_error_count: Mapped[int] = mapped_column(Integer, default=0)
+    priority_score: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"))
+    last_deep_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MarketOpportunitySnapshot(Base):
+    __tablename__ = "market_opportunity_snapshots"
+    __table_args__ = (
+        UniqueConstraint("run_id", "option_id", name="uq_market_run_option"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    option_id: Mapped[str] = mapped_column(String(128), index=True)
+    strategy: Mapped[str] = mapped_column(String(32))
+    expiration_date: Mapped[str] = mapped_column(String(16))
+    strike_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    delta: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    bid: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    ask: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    mark: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    open_interest: Mapped[int] = mapped_column(Integer)
+    volume: Mapped[int] = mapped_column(Integer)
+    spread_pct: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    estimated_credit: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    estimated_collateral: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    estimated_max_loss: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    score: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    risk_approved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    rejection_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    risk_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
+    minimum_equity_for_trade_limit: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 4), nullable=True
+    )
+    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 ```
 
-`MarketScanSymbol` must have a unique constraint on `(run_id, symbol)` and fields for source slice, priority, equity status/reasons, earnings status, option scan status, counts, errors, start/completion timestamps, and consecutive error count.
-
-`MarketOpportunitySnapshot` must have a unique constraint on `(run_id, option_id)` and Numeric fields for strike, bid, ask, mark, credit, collateral, and max loss.
+Also update imports in `app/persistence/models.py` to include `UniqueConstraint`.
 
 - [ ] **Step 4: Implement store methods**
 
 Implement focused methods:
 
 ```python
-create_run(...)
-get_run(run_id)
-get_active_run()
-recover_interrupted_runs()
-upsert_symbol(...)
-mark_equity_screen(...)
-mark_deep_scan(...)
-replace_symbol_opportunities(...)
-latest_opportunities(...)
-latest_near_misses(...)
-stale_symbol_candidates(...)
+def create_run(
+    self,
+    *,
+    risk_capital_mode: str,
+    risk_equity: Decimal,
+    config_snapshot: dict[str, object],
+) -> MarketScanRun
+
+def get_run(self, run_id: str) -> MarketScanRun | None
+
+def get_active_run(self) -> MarketScanRun | None
+
+def recover_interrupted_runs(self) -> list[str]
+
+def upsert_symbol(
+    self,
+    run_id: str,
+    symbol: str,
+    source_slice: str,
+    watchlist_priority: bool,
+) -> MarketScanSymbol
+
+def mark_equity_screen(
+    self,
+    run_id: str,
+    symbol: str,
+    result: EquityScreenResult,
+) -> None
+
+def mark_deep_scan(
+    self,
+    run_id: str,
+    symbol: str,
+    *,
+    status: str,
+    market_filter_passes: int,
+    mechanical_match_count: int,
+    near_miss_count: int,
+    tool_errors: dict[str, str],
+) -> None
+
+def replace_symbol_opportunities(
+    self,
+    run_id: str,
+    symbol: str,
+    rows: list[dict[str, object]],
+) -> None
+
+def latest_opportunities(self, symbol: str | None = None) -> list[MarketOpportunitySnapshot]
+
+def latest_near_misses(self, symbol: str | None = None) -> list[MarketOpportunitySnapshot]
+
+def stale_symbol_candidates(self, run_id: str, limit: int) -> list[MarketScanSymbol]
 ```
 
 `recover_interrupted_runs()` changes only `discovering` and `deep_scanning` to `queued`; completed symbol rows stay completed.
@@ -832,10 +936,30 @@ git commit -m "Add bounded market-wide option deep scanner"
 ```python
 @pytest.mark.asyncio
 async def test_startup_requeues_interrupted_run_without_resetting_completed_symbols():
-    run = store.create_run(...)
+    run = store.create_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={"max_deep_symbols": 100},
+    )
     store.set_run_status(run.id, "deep_scanning")
-    store.mark_deep_scan(run.id, "AAPL", status="complete", ...)
-    store.mark_deep_scan(run.id, "MSFT", status="running", ...)
+    store.mark_deep_scan(
+        run.id,
+        "AAPL",
+        status="complete",
+        market_filter_passes=4,
+        mechanical_match_count=1,
+        near_miss_count=0,
+        tool_errors={},
+    )
+    store.mark_deep_scan(
+        run.id,
+        "MSFT",
+        status="running",
+        market_filter_passes=0,
+        mechanical_match_count=0,
+        near_miss_count=0,
+        tool_errors={},
+    )
 
     await worker.start()
     recovered = store.get_run(run.id)
@@ -855,11 +979,19 @@ async def test_worker_marks_partial_when_one_symbol_exhausts_retries():
 
 @pytest.mark.asyncio
 async def test_worker_rejects_second_active_run():
-    first = store.create_run(...)
+    first = store.create_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={"max_deep_symbols": 100},
+    )
     store.set_run_status(first.id, "discovering")
 
     with pytest.raises(RuntimeError, match="active market scan"):
-        worker.create_or_queue_run(...)
+        worker.create_or_queue_run(
+            risk_capital_mode="simulation",
+            risk_equity=Decimal("750000"),
+            config_snapshot={"max_deep_symbols": 100},
+        )
 ```
 
 Add stop/cancellation test that checkpoints before task exits.
@@ -989,16 +1121,37 @@ Add a test around the existing promotion service/route proving persisted market 
 
 ```python
 @pytest.mark.asyncio
-async def test_market_snapshot_cannot_be_promoted_without_fresh_symbol_rescan(...):
-    persisted = market_opportunity(option_id="old-opt", symbol="AAPL")
-    market_data.scan_symbol.return_value = scan_without_option("old-opt")
+async def test_market_snapshot_cannot_be_promoted_without_fresh_symbol_rescan(
+    monkeypatch,
+    db,
+):
+    from fastapi import HTTPException
+    from app.api import routes
+    from app.api.schemas import CandidatePromotionRequest
+    from app.robinhood.market_data import OptionScanResult
 
-    response = await promote_phase_one_candidate(
-        CandidatePromotionRequest(symbol="AAPL", option_id="old-opt"),
-        db,
-    )
+    async def fresh_scan_without_old_option(symbol: str):
+        return OptionScanResult(
+            symbol=symbol,
+            scanned_at="2026-09-19T16:00:00+00:00",
+            contracts=[],
+        )
 
-    assert response.status_code == 409
+    async def no_op_sync():
+        routes.robinhood_read_service.snapshot.connection_state = "connected"
+        return routes.robinhood_read_service.snapshot
+
+    monkeypatch.setattr(routes.robinhood_market_data, "scan_symbol", fresh_scan_without_old_option)
+    monkeypatch.setattr(routes.robinhood_read_service, "sync_once", no_op_sync)
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.promote_phase_one_candidate(
+            CandidatePromotionRequest(symbol="AAPL", option_id="old-opt"),
+            db,
+        )
+
+    assert exc.value.status_code == 409
+    assert "no longer passes" in str(exc.value.detail)
 ```
 
 If direct route invocation is awkward, extract only the existing promotion implementation into a small service in this task and keep route behavior unchanged.
