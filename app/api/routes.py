@@ -1183,6 +1183,269 @@ async def promote_phase_one_candidate(
 
 
 
+@router.get("/simulation/positions")
+def simulation_positions(db: Session = Depends(db_session)):
+    _require_simulation_mode()
+
+    rows = db.scalars(
+        select(SimulationPosition)
+        .order_by(SimulationPosition.opened_at.desc())
+    ).all()
+    risk_state = simulation_risk_state_service.build(
+        db,
+        capital=Decimal(str(settings.simulation_capital)),
+    )
+
+    return {
+        "risk_capital_mode": RiskCapitalMode.SIMULATION.value,
+        "simulation_capital": settings.simulation_capital,
+        "execution_enabled": False,
+        "risk_authoritative": risk_state.authoritative,
+        "risk_state_reasons": list(risk_state.reasons),
+        "open_position_max_loss": (
+            str(risk_state.snapshot.open_position_max_loss)
+            if risk_state.snapshot is not None
+            else None
+        ),
+        "realized_pnl_today": (
+            str(risk_state.snapshot.realized_pnl_today)
+            if risk_state.snapshot is not None
+            else None
+        ),
+        "positions": [
+            {
+                "id": row.id,
+                "proposal_id": row.proposal_id,
+                "underlying": row.underlying,
+                "strategy": row.strategy,
+                "option_id": row.option_id,
+                "contracts": row.contracts,
+                "strike_price": str(row.strike_price),
+                "expiration_date": row.expiration_date,
+                "entry_credit": str(row.entry_credit),
+                "known_max_loss": str(row.known_max_loss),
+                "status": row.status,
+                "exit_debit": (
+                    str(row.exit_debit) if row.exit_debit is not None else None
+                ),
+                "realized_pnl": (
+                    str(row.realized_pnl)
+                    if row.realized_pnl is not None
+                    else None
+                ),
+                "opened_at": row.opened_at,
+                "closed_at": row.closed_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/simulation/proposals/{proposal_id}/fill")
+def simulate_fill(
+    proposal_id: str,
+    action: ApprovalAction,
+    db: Session = Depends(db_session),
+):
+    _require_simulation_mode()
+
+    proposal = db.get(TradeProposal, proposal_id)
+    if proposal is None:
+        raise HTTPException(404, "Proposal not found.")
+    if not proposal.id.startswith("sim-"):
+        raise HTTPException(409, "Only simulation proposals can be simulated.")
+    if proposal.status != "approved":
+        raise HTTPException(
+            409,
+            f"Simulation proposal must be approved before fill; current status is {proposal.status}.",
+        )
+
+    existing_position = db.scalar(
+        select(SimulationPosition).where(
+            SimulationPosition.proposal_id == proposal.id
+        )
+    )
+    if existing_position is not None:
+        raise HTTPException(
+            409,
+            "This simulation proposal already has a persisted position.",
+        )
+
+    detail = db.get(TradeProposalDetail, proposal.id)
+    if detail is None:
+        raise HTTPException(409, "Simulation proposal detail is missing.")
+
+    try:
+        candidate = json.loads(detail.candidate_json)
+        strike_price = Decimal(str(candidate["strike_price"]))
+        expiration_date = str(candidate["expiration_date"])
+        entry_credit = Decimal(str(candidate["estimated_credit"]))
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            409,
+            "Simulation candidate data is incomplete or invalid.",
+        ) from exc
+
+    current_state = simulation_risk_state_service.build(
+        db,
+        capital=Decimal(str(settings.simulation_capital)),
+    )
+    if not current_state.authoritative or current_state.snapshot is None:
+        raise HTTPException(
+            409,
+            {
+                "message": "Simulation risk state is not authoritative.",
+                "reasons": list(current_state.reasons),
+            },
+        )
+
+    reserved_loss = Decimal(str(proposal.known_max_loss))
+    base_snapshot = AccountRiskSnapshot(
+        equity=current_state.snapshot.equity,
+        open_position_max_loss=max(
+            current_state.snapshot.open_position_max_loss - reserved_loss,
+            Decimal("0"),
+        ),
+        realized_pnl_today=current_state.snapshot.realized_pnl_today,
+        concurrent_positions=max(
+            current_state.snapshot.concurrent_positions - 1,
+            0,
+        ),
+        paused_underlyings=current_state.snapshot.paused_underlyings,
+    )
+    intent = TradeIntent(
+        strategy=StrategyType(proposal.strategy),
+        underlying=proposal.underlying,
+        contracts=proposal.contracts,
+        known_max_loss=reserved_loss,
+        has_short_put=(proposal.strategy == StrategyType.CASH_SECURED_PUT.value),
+        is_defined_risk=True,
+        id=proposal.id,
+    )
+    decision = risk_manager.evaluate(
+        intent,
+        base_snapshot,
+        current_policy(),
+    )
+    if not decision.approved:
+        raise HTTPException(
+            409,
+            {
+                "message": "Simulation fill no longer passes current risk rules.",
+                "reasons": list(decision.reasons),
+            },
+        )
+
+    position = SimulationPosition(
+        id=f"simpos-{uuid4()}",
+        proposal_id=proposal.id,
+        underlying=proposal.underlying,
+        strategy=proposal.strategy,
+        option_id=detail.option_id,
+        contracts=proposal.contracts,
+        strike_price=strike_price,
+        expiration_date=expiration_date,
+        entry_credit=entry_credit,
+        known_max_loss=reserved_loss,
+        status="open",
+    )
+    proposal.status = "filled"
+    db.add(position)
+    db.add(
+        AuditEvent(
+            event_type="simulation_fill",
+            severity="info",
+            underlying=proposal.underlying,
+            message=f"Simulation proposal {proposal.id} filled in virtual ledger.",
+            payload_json=json.dumps(
+                {
+                    "proposal_id": proposal.id,
+                    "position_id": position.id,
+                    "actor": action.actor,
+                    "note": action.note,
+                    "entry_credit": str(entry_credit),
+                    "known_max_loss": str(reserved_loss),
+                    "execution_enabled": False,
+                }
+            ),
+        )
+    )
+    db.commit()
+
+    return {
+        "status": "open",
+        "position_id": position.id,
+        "proposal_id": proposal.id,
+        "entry_credit": str(position.entry_credit),
+        "known_max_loss": str(position.known_max_loss),
+        "risk_capital_mode": RiskCapitalMode.SIMULATION.value,
+        "execution_enabled": False,
+    }
+
+
+@router.post("/simulation/positions/{position_id}/close")
+def close_simulation_position(
+    position_id: str,
+    body: SimulationCloseRequest,
+    db: Session = Depends(db_session),
+):
+    _require_simulation_mode()
+
+    position = db.get(SimulationPosition, position_id)
+    if position is None:
+        raise HTTPException(404, "Simulation position not found.")
+    if position.status != "open":
+        raise HTTPException(
+            409,
+            f"Simulation position is already {position.status}.",
+        )
+
+    exit_debit = Decimal(str(body.exit_debit))
+    realized_pnl = Decimal(str(position.entry_credit)) - exit_debit
+
+    position.exit_debit = exit_debit
+    position.realized_pnl = realized_pnl
+    position.status = "closed"
+    position.closed_at = datetime.now(ZoneInfo("UTC"))
+
+    proposal = db.get(TradeProposal, position.proposal_id)
+    if proposal is not None:
+        proposal.status = "dry_run_logged"
+
+    db.add(
+        AuditEvent(
+            event_type="simulation_close",
+            severity="info" if realized_pnl >= 0 else "warning",
+            underlying=position.underlying,
+            message=f"Simulation position {position.id} closed in virtual ledger.",
+            payload_json=json.dumps(
+                {
+                    "proposal_id": position.proposal_id,
+                    "position_id": position.id,
+                    "actor": body.actor,
+                    "note": body.note,
+                    "entry_credit": str(position.entry_credit),
+                    "exit_debit": str(exit_debit),
+                    "realized_pnl": str(realized_pnl),
+                    "execution_enabled": False,
+                }
+            ),
+        )
+    )
+    db.commit()
+
+    return {
+        "status": "closed",
+        "position_id": position.id,
+        "proposal_id": position.proposal_id,
+        "entry_credit": str(position.entry_credit),
+        "exit_debit": str(position.exit_debit),
+        "realized_pnl": str(position.realized_pnl),
+        "risk_capital_mode": RiskCapitalMode.SIMULATION.value,
+        "execution_enabled": False,
+    }
+
+
 @router.get("/robinhood/pnl-diagnostics")
 async def robinhood_pnl_diagnostics():
     """Safe diagnostics for Robinhood P&L tools.
