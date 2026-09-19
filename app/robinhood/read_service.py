@@ -1,3 +1,4 @@
+import re
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -36,8 +37,35 @@ def _is_transient_mcp_error(exc: BaseException) -> bool:
     )
 
 
+def _find_labeled_pnl_text(value: Any) -> float | None:
+    if not isinstance(value, str):
+        return None
+
+    patterns = (
+        r'(?im)^\s*(?:total[_\s-]*returns?|total[_\s-]*realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)',
+        r'(?im)^\s*(?:realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value)
+        if not match:
+            continue
+        raw = match.group(1).replace(",", "")
+        try:
+            parsed = float(raw)
+        except ValueError:
+            continue
+        # Parentheses after the label are commonly used for negative currency.
+        line = match.group(0)
+        if "(" in line and ")" in line and parsed > 0:
+            parsed = -parsed
+        return parsed
+    return None
+
+
 def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
     explicit_total_keys = (
+        "total_returns",
+        "total_return",
         "total_realized_gain_loss",
         "total_realized_pnl",
         "total_realized_gain",
@@ -89,6 +117,10 @@ def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
     value = find_first_number(data_section, component_keys)
     if value is not None:
         return value, True
+
+    text_value = _find_labeled_pnl_text(payload)
+    if text_value is not None:
+        return text_value, True
 
     return None, False
 
