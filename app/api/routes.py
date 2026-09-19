@@ -696,10 +696,21 @@ async def robinhood_pnl_diagnostics():
 
     account_number = robinhood_read_service.snapshot.agentic_account_number
     if not account_number:
-        raise HTTPException(409, "Agentic account number is not synchronized.")
+        await robinhood_read_service.sync_once()
+        account_number = robinhood_read_service.snapshot.agentic_account_number
+
+    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    if not account_number:
+        return {
+            "market_date": today,
+            "account_number_present": False,
+            "connection_state": robinhood_read_service.snapshot.connection_state,
+            "sync_errors": robinhood_read_service.snapshot.tool_errors,
+            "detail": "Agentic account number could not be synchronized.",
+            "tools": {},
+        }
 
     catalog = await robinhood.tool_catalog()
-    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     result: dict[str, object] = {
         "market_date": today,
         "account_number_present": True,
