@@ -93,6 +93,50 @@ def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
     return None, False
 
 
+def _parse_trade_history_daily_pnl(
+    payload: Any,
+    *,
+    scoped_to_day: bool,
+) -> tuple[float | None, bool]:
+    data_section = (
+        payload.get("data")
+        if isinstance(payload, dict) and "data" in payload
+        else payload
+    )
+    rows = find_first_list(
+        data_section,
+        ("results", "trades", "history", "items", "rows"),
+    )
+
+    if rows is not None and not rows:
+        return (0.0, True) if scoped_to_day else (None, False)
+
+    component_keys = (
+        "realized_gain_loss",
+        "realized_pnl",
+        "realized_gain",
+        "realized_pl",
+        "realized_profit_loss",
+        "profit_loss",
+        "pnl",
+        "gain_loss",
+        "amount",
+    )
+
+    if rows:
+        values: list[float] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            value = find_first_number(row, component_keys)
+            if value is not None:
+                values.append(value)
+        if values and scoped_to_day:
+            return float(sum(values)), True
+
+    return None, False
+
+
 @dataclass
 class RobinhoodSnapshot:
     connection_state: str = "disabled"
@@ -107,6 +151,8 @@ class RobinhoodSnapshot:
     realized_pnl_today: float | None = None
     realized_pnl_authoritative: bool = False
     realized_pnl_shape: Any = None
+    realized_pnl_source: str | None = None
+    pnl_trade_history_shape: Any = None
     open_equity_positions: int = 0
     open_option_positions: int = 0
     open_orders: int = 0
@@ -252,6 +298,8 @@ class RobinhoodReadService:
         realized_pnl = None
         realized_pnl_authoritative = False
         realized_pnl_shape = None
+        realized_pnl_source = None
+        pnl_trade_history_shape = None
         try:
             catalog = await self.client.tool_catalog()
             tool = catalog.get("get_realized_pnl")
@@ -271,6 +319,56 @@ class RobinhoodReadService:
                 realized_pnl, realized_pnl_authoritative = _parse_realized_pnl(
                     realized_payload
                 )
+                if realized_pnl_authoritative:
+                    realized_pnl_source = "get_realized_pnl"
+
+            if not realized_pnl_authoritative:
+                history_tool = catalog.get("get_pnl_trade_history")
+                if history_tool:
+                    history_schema = history_tool.get("input_schema") or {}
+                    history_args = build_arguments(
+                        history_schema,
+                        {
+                            "account_number": account_number,
+                            "start_date": today,
+                            "end_date": today,
+                            "span": "day",
+                            "limit": 500,
+                        },
+                    )
+                    date_scope_fields = {
+                        "start_date",
+                        "from_date",
+                        "start",
+                        "since",
+                        "after",
+                        "end_date",
+                        "to_date",
+                        "end",
+                        "until",
+                        "before",
+                        "span",
+                        "period",
+                        "window",
+                    }
+                    scoped_to_day = any(
+                        key in history_args for key in date_scope_fields
+                    )
+                    history_payload = await self.client.call(
+                        "get_pnl_trade_history",
+                        history_args,
+                    )
+                    pnl_trade_history_shape = payload_shape(history_payload)
+                    fallback_pnl, fallback_authoritative = (
+                        _parse_trade_history_daily_pnl(
+                            history_payload,
+                            scoped_to_day=scoped_to_day,
+                        )
+                    )
+                    if fallback_authoritative:
+                        realized_pnl = fallback_pnl
+                        realized_pnl_authoritative = True
+                        realized_pnl_source = "get_pnl_trade_history"
         except Exception as exc:
             tool_errors["get_realized_pnl"] = _exception_message(exc)
 
@@ -340,6 +438,8 @@ class RobinhoodReadService:
             realized_pnl_today=realized_pnl,
             realized_pnl_authoritative=realized_pnl_authoritative,
             realized_pnl_shape=realized_pnl_shape,
+            realized_pnl_source=realized_pnl_source,
+            pnl_trade_history_shape=pnl_trade_history_shape,
             open_equity_positions=open_equity_positions,
             open_option_positions=open_option_positions,
             open_orders=open_orders,
