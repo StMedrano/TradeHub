@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -136,6 +138,22 @@ class SimulationRiskStateService:
             Decimal("0"),
         )
 
+        closed_positions = db.scalars(
+            select(SimulationPosition).where(
+                SimulationPosition.status == "closed"
+            )
+        ).all()
+        market_today = datetime.now(ZoneInfo("America/New_York")).date()
+        realized_pnl_today = Decimal("0")
+        for row in closed_positions:
+            if row.closed_at is None or row.realized_pnl is None:
+                continue
+            closed_at = row.closed_at
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=timezone.utc)
+            if closed_at.astimezone(ZoneInfo("America/New_York")).date() == market_today:
+                realized_pnl_today += Decimal(str(row.realized_pnl))
+
         pauses = db.scalars(
             select(UnderlyingPause).where(
                 UnderlyingPause.acknowledged.is_(False)
@@ -155,7 +173,7 @@ class SimulationRiskStateService:
             snapshot=AccountRiskSnapshot(
                 equity=capital,
                 open_position_max_loss=open_position_max_loss,
-                realized_pnl_today=Decimal("0"),
+                realized_pnl_today=realized_pnl_today,
                 concurrent_positions=len(active_proposals) + len(open_positions),
                 paused_underlyings=paused,
             ),
