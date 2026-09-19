@@ -1,9 +1,12 @@
 import re
+import json
+import os
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any
+from pathlib import Path
 
 from app.config import settings
 from app.robinhood.client import RobinhoodAuthRequired, RobinhoodTradingMCP
@@ -12,6 +15,31 @@ from app.robinhood.schema_args import build_arguments
 
 
 OPEN_ORDER_STATES = {"queued", "confirmed", "partially_filled", "pending", "open"}
+
+
+def _load_persisted_account_number() -> str | None:
+    path = Path(settings.robinhood_account_store)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    value = raw.get("agentic_account_number") if isinstance(raw, dict) else None
+    return str(value) if value else None
+
+
+def _persist_account_number(account_number: str) -> None:
+    path = Path(settings.robinhood_account_store)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(
+        json.dumps({"agentic_account_number": account_number}, indent=2),
+        encoding="utf-8",
+    )
+    os.chmod(temp, 0o600)
+    temp.replace(path)
+    os.chmod(path, 0o600)
 
 
 def _exception_message(exc: BaseException) -> str:
@@ -206,7 +234,9 @@ class RobinhoodReadService:
 
     def __init__(self, client: RobinhoodTradingMCP | None = None):
         self.client = client or RobinhoodTradingMCP()
-        self.snapshot = RobinhoodSnapshot()
+        self.snapshot = RobinhoodSnapshot(
+            agentic_account_number=_load_persisted_account_number()
+        )
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
 
@@ -306,6 +336,7 @@ class RobinhoodReadService:
             discovered_account = self._agentic_account_number(accounts)
             if discovered_account:
                 account_number = discovered_account
+                _persist_account_number(discovered_account)
         except RobinhoodAuthRequired as exc:
             self.snapshot.connection_state = "authentication_required"
             self.snapshot.last_error = str(exc)
