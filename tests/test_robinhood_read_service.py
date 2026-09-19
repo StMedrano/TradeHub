@@ -1,4 +1,8 @@
-from app.robinhood.read_service import RobinhoodReadService, _parse_realized_pnl
+from app.robinhood.read_service import (
+    RobinhoodReadService,
+    _parse_realized_pnl,
+    _parse_trade_history_daily_pnl,
+)
 
 
 def test_selects_agentic_account():
@@ -90,3 +94,46 @@ def test_realized_pnl_prefers_explicit_total_over_components():
     value, authoritative = _parse_realized_pnl(payload)
     assert value == 20.0
     assert authoritative is True
+
+
+
+def test_trade_history_fallback_sums_scoped_rows():
+    payload = {
+        "data": {
+            "results": [
+                {"realized_pnl": "4.50", "closed_at": "2026-09-18T14:00:00Z"},
+                {"realized_pnl": "-1.25", "closed_at": "2026-09-18T15:00:00Z"},
+            ]
+        }
+    }
+    value, authoritative = _parse_trade_history_daily_pnl(
+        payload,
+        scoped_to_day=True,
+    )
+    assert value == 3.25
+    assert authoritative is True
+
+
+def test_trade_history_empty_scoped_day_is_zero():
+    value, authoritative = _parse_trade_history_daily_pnl(
+        {"data": {"results": []}},
+        scoped_to_day=True,
+    )
+    assert value == 0.0
+    assert authoritative is True
+
+
+def test_trade_history_unscoped_payload_does_not_unlock_risk():
+    payload = {
+        "data": {
+            "results": [
+                {"realized_pnl": "4.50", "closed_at": "2026-09-18T14:00:00Z"}
+            ]
+        }
+    }
+    value, authoritative = _parse_trade_history_daily_pnl(
+        payload,
+        scoped_to_day=False,
+    )
+    assert value is None
+    assert authoritative is False
