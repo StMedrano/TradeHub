@@ -450,11 +450,45 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
         db,
         robinhood_read_service.snapshot,
     )
-    promotable_csp_exists = any(
-        candidate.strategy == "cash_secured_put"
-        and candidate.buying_power_sufficient is True
-        for candidate in candidates
-    )
+    candidate_rows = []
+    risk_approved_candidate_exists = False
+
+    for candidate in candidates:
+        row = candidate.as_dict()
+        row["risk_preview_authoritative"] = risk_state.authoritative
+        row["risk_approved"] = False
+        row["risk_reasons"] = list(risk_state.reasons)
+
+        if (
+            risk_state.authoritative
+            and risk_state.snapshot is not None
+            and candidate.strategy == "cash_secured_put"
+            and candidate.buying_power_sufficient is True
+            and candidate.estimated_max_loss is not None
+        ):
+            preview_intent = TradeIntent(
+                strategy=StrategyType.CASH_SECURED_PUT,
+                underlying=candidate.symbol,
+                contracts=candidate.contracts,
+                known_max_loss=candidate.estimated_max_loss,
+                shares_held=candidate.shares_held,
+                has_short_put=True,
+                is_defined_risk=True,
+            )
+            preview = risk_manager.evaluate(
+                preview_intent,
+                risk_state.snapshot,
+                current_policy(),
+            )
+            row["risk_approved"] = preview.approved
+            row["risk_reasons"] = list(preview.reasons)
+            row["trade_limit"] = str(preview.trade_limit)
+            row["portfolio_limit"] = str(preview.portfolio_limit)
+            row["daily_loss_limit"] = str(preview.daily_loss_limit)
+            if preview.approved:
+                risk_approved_candidate_exists = True
+
+        candidate_rows.append(row)
 
     return {
         "symbol": scan.symbol,
@@ -462,7 +496,7 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
         "underlying_price": scan.underlying_price,
         "selected_expirations": scan.selected_expirations,
         "strike_search_count": scan.strike_search_count,
-        "candidates": [candidate.as_dict() for candidate in candidates],
+        "candidates": candidate_rows,
         "diagnostics": [item.as_dict() for item in diagnostics],
         "passed_contracts": sum(1 for item in diagnostics if item.passed),
         "rejected_contracts": sum(1 for item in diagnostics if not item.passed),
@@ -477,11 +511,11 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
         },
         "portfolio_risk_authoritative": risk_state.authoritative,
         "risk_state_reasons": list(risk_state.reasons),
-        "approval_ready": risk_state.authoritative and promotable_csp_exists,
+        "approval_ready": risk_state.authoritative and risk_approved_candidate_exists,
         "execution_enabled": False,
         "note": (
             "A CSP can be promoted into the dry-run approval queue."
-            if risk_state.authoritative and promotable_csp_exists
+            if risk_state.authoritative and risk_approved_candidate_exists
             else "Candidates remain non-executable until all authoritative risk gates pass."
         ),
         "tool_errors": scan.tool_errors,
