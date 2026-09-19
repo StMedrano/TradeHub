@@ -65,6 +65,25 @@ def _is_transient_mcp_error(exc: BaseException) -> bool:
     )
 
 
+def _explicit_no_pnl_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = re.sub(r"\s+", " ", value).strip().lower()
+    phrases = (
+        "no realized p&l",
+        "no realized pnl",
+        "no realized profit",
+        "no realized gain",
+        "no realized gains",
+        "no pnl data",
+        "no p&l data",
+        "no trade history",
+        "no trades found",
+        "no realized trades",
+    )
+    return any(phrase in text for phrase in phrases)
+
+
 def _find_labeled_pnl_text(value: Any) -> float | None:
     if not isinstance(value, str):
         return None
@@ -150,6 +169,9 @@ def _parse_realized_pnl(payload: Any) -> tuple[float | None, bool]:
     if text_value is not None:
         return text_value, True
 
+    if _explicit_no_pnl_text(payload):
+        return 0.0, True
+
     return None, False
 
 
@@ -193,6 +215,13 @@ def _parse_trade_history_daily_pnl(
                 values.append(value)
         if values and scoped_to_day:
             return float(sum(values)), True
+
+    if scoped_to_day and _explicit_no_pnl_text(payload):
+        return 0.0, True
+
+    text_value = _find_labeled_pnl_text(payload)
+    if scoped_to_day and text_value is not None:
+        return text_value, True
 
     return None, False
 
