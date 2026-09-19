@@ -415,7 +415,10 @@ class RobinhoodReadService:
                         "end_date": today,
                     },
                 )
-                realized_payload = await self.client.call("get_realized_pnl", pnl_args)
+                realized_payload = await self._call_read_with_retry(
+                    "get_realized_pnl",
+                    pnl_args,
+                )
                 realized_pnl_shape = payload_shape(realized_payload)
                 realized_pnl, realized_pnl_authoritative = _parse_realized_pnl(
                     realized_payload
@@ -455,7 +458,7 @@ class RobinhoodReadService:
                     scoped_to_day = any(
                         key in history_args for key in date_scope_fields
                     )
-                    history_payload = await self.client.call(
+                    history_payload = await self._call_read_with_retry(
                         "get_pnl_trade_history",
                         history_args,
                     )
