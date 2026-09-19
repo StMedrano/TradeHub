@@ -31,6 +31,34 @@ def db_session():
     finally:
         db.close()
 
+def _watchlist_symbols(raw: str | None) -> list[str]:
+    source = raw if raw is not None else settings.strategy_watchlist
+    values: list[str] = []
+    seen: set[str] = set()
+
+    for part in source.split(","):
+        symbol = part.strip().upper()
+        if not symbol:
+            continue
+        if len(symbol) > 12 or not all(ch.isalnum() or ch in {".", "-"} for ch in symbol):
+            raise HTTPException(400, f"Invalid symbol in watchlist: {symbol}")
+        if symbol not in seen:
+            seen.add(symbol)
+            values.append(symbol)
+
+    if not values:
+        raise HTTPException(
+            400,
+            "No symbols supplied. Pass ?symbols=AAPL,MSFT or configure STRATEGY_WATCHLIST.",
+        )
+    if len(values) > settings.strategy_watchlist_max_symbols:
+        raise HTTPException(
+            400,
+            f"Too many symbols. Maximum per scan is {settings.strategy_watchlist_max_symbols}.",
+        )
+    return values
+
+
 def current_policy() -> RiskPolicy:
     return RiskPolicy(
         max_trade_loss_pct=Decimal(str(settings.max_trade_loss_pct)),
@@ -607,6 +635,167 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
         "response_shapes": scan.response_shapes,
     }
 
+
+
+@router.get("/opportunities/account-fit")
+async def account_fit_opportunities(
+    symbols: str | None = None,
+    db: Session = Depends(db_session),
+):
+    """Read-only watchlist scan for CSPs that fit synchronized account risk."""
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(409, "Robinhood MCP is disabled.")
+
+    requested_symbols = _watchlist_symbols(symbols)
+
+    # One authoritative refresh for the complete watchlist pass. Scans remain
+    # read-only and execution stays disabled.
+    await robinhood_read_service.sync_once()
+    if robinhood_read_service.snapshot.connection_state not in {
+        "connected",
+        "degraded",
+    }:
+        raise HTTPException(
+            409,
+            "Robinhood read connection is not ready. Complete OAuth and sync first.",
+        )
+
+    risk_state = portfolio_risk_state_service.build(
+        db,
+        robinhood_read_service.snapshot,
+    )
+    if not risk_state.authoritative or risk_state.snapshot is None:
+        raise HTTPException(
+            409,
+            {
+                "message": "Authoritative portfolio risk state is not available.",
+                "reasons": list(risk_state.reasons),
+            },
+        )
+
+    policy = current_policy()
+    matches: list[dict[str, object]] = []
+    scanned: list[dict[str, object]] = []
+
+    for symbol in requested_symbols:
+        try:
+            scan = await robinhood_market_data.scan_symbol(symbol)
+        except Exception as exc:
+            scanned.append(
+                {
+                    "symbol": symbol,
+                    "status": "scan_error",
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        candidates = phase_one_candidate_engine.generate(
+            scan,
+            robinhood_read_service.snapshot,
+        )
+
+        generated_csps = 0
+        buying_power_fit = 0
+        risk_passes = 0
+        rejection_reasons: dict[str, int] = {}
+
+        for candidate in candidates:
+            if candidate.strategy != "cash_secured_put":
+                continue
+
+            generated_csps += 1
+            if candidate.buying_power_sufficient is not True:
+                reason = (
+                    candidate.reasons[0]
+                    if candidate.reasons
+                    else "Buying power is insufficient or unavailable."
+                )
+                rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                continue
+
+            buying_power_fit += 1
+            if candidate.estimated_max_loss is None:
+                reason = "Candidate maximum loss is unavailable."
+                rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                continue
+
+            intent = TradeIntent(
+                strategy=StrategyType.CASH_SECURED_PUT,
+                underlying=candidate.symbol,
+                contracts=candidate.contracts,
+                known_max_loss=candidate.estimated_max_loss,
+                shares_held=candidate.shares_held,
+                has_short_put=True,
+                is_defined_risk=True,
+            )
+            preview = risk_manager.evaluate(
+                intent,
+                risk_state.snapshot,
+                policy,
+            )
+
+            if not preview.approved:
+                for reason in preview.reasons:
+                    rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                continue
+
+            risk_passes += 1
+            row = candidate.as_dict()
+            row.update(
+                {
+                    "risk_approved": True,
+                    "risk_reasons": [],
+                    "trade_limit": str(preview.trade_limit),
+                    "portfolio_limit": str(preview.portfolio_limit),
+                    "daily_loss_limit": str(preview.daily_loss_limit),
+                    "execution_enabled": False,
+                    "mechanical_only": True,
+                }
+            )
+            matches.append(row)
+
+        scanned.append(
+            {
+                "symbol": symbol,
+                "status": "scanned",
+                "market_filter_passes": sum(
+                    1
+                    for item in phase_one_candidate_engine.diagnose(
+                        scan,
+                        robinhood_read_service.snapshot,
+                    )
+                    if item.passed
+                ),
+                "generated_csps": generated_csps,
+                "buying_power_fit": buying_power_fit,
+                "risk_passes": risk_passes,
+                "rejection_reasons": rejection_reasons,
+                "tool_errors": scan.tool_errors,
+            }
+        )
+
+    matches.sort(
+        key=lambda row: (
+            -float(row.get("score") or 0),
+            str(row.get("symbol") or ""),
+            str(row.get("expiration_date") or ""),
+        )
+    )
+
+    return {
+        "symbols": requested_symbols,
+        "portfolio_risk_authoritative": risk_state.authoritative,
+        "mechanical_matches": matches,
+        "match_count": len(matches),
+        "scan_summary": scanned,
+        "execution_enabled": False,
+        "trading_mode": settings.trading_mode.value,
+        "note": (
+            "These are mechanical CSP matches that fit synchronized buying power "
+            "and current TradeHub risk rules. They are not investment recommendations."
+        ),
+    }
 
 
 @router.post("/opportunities/promote")
