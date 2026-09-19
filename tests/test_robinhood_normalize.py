@@ -89,3 +89,22 @@ def test_mcp_result_decodes_fenced_json_structured_content():
     decoded = mcp_result_to_data(payload)
 
     assert decoded == {"data": {"results": []}}
+
+
+
+def test_mcp_result_recursively_decodes_nested_json_strings():
+    payload = _FakeResult(
+        {
+            "data": '{"results":[{"realized_pnl":"3.21"}]}'
+        }
+    )
+
+    decoded = mcp_result_to_data(payload)
+
+    assert decoded == {
+        "data": {
+            "results": [
+                {"realized_pnl": "3.21"}
+            ]
+        }
+    }
