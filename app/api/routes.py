@@ -927,7 +927,8 @@ async def promote_phase_one_candidate(
     await robinhood_read_service.sync_once()
 
     symbol = body.symbol.strip().upper()
-    candidate_key = f"{symbol}:{body.option_id}"
+    risk_mode = _risk_mode_label()
+    candidate_key = f"{risk_mode}:{symbol}:{body.option_id}"
 
     existing = db.scalar(
         select(TradeProposalDetail).where(
@@ -940,10 +941,7 @@ async def promote_phase_one_candidate(
             "This Robinhood option candidate has already been promoted.",
         )
 
-    risk_state = portfolio_risk_state_service.build(
-        db,
-        robinhood_read_service.snapshot,
-    )
+    risk_state = _effective_risk_state(db)
     if not risk_state.authoritative or risk_state.snapshot is None:
         raise HTTPException(
             409,
@@ -955,9 +953,10 @@ async def promote_phase_one_candidate(
 
     try:
         scan = await robinhood_market_data.scan_symbol(symbol)
+        strategy_snapshot = _strategy_account_snapshot(risk_state.snapshot)
         candidates = phase_one_candidate_engine.generate(
             scan,
-            robinhood_read_service.snapshot,
+            strategy_snapshot,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -986,7 +985,7 @@ async def promote_phase_one_candidate(
     if candidate.buying_power_sufficient is not True:
         raise HTTPException(
             409,
-            "Synchronized buying power is insufficient or unavailable.",
+            "Active risk-capital buying power is insufficient or unavailable.",
         )
 
     if candidate.estimated_max_loss is None:
@@ -1000,6 +999,7 @@ async def promote_phase_one_candidate(
         shares_held=candidate.shares_held,
         has_short_put=True,
         is_defined_risk=True,
+        id=(f"sim-{uuid4()}" if _using_simulation() else str(uuid4())),
     )
     result = risk_manager.evaluate(
         intent,
@@ -1024,7 +1024,16 @@ async def promote_phase_one_candidate(
             proposal_id=intent.id,
             candidate_key=candidate_key,
             option_id=body.option_id,
-            candidate_json=json.dumps(candidate.as_dict()),
+            candidate_json=json.dumps(
+                {
+                    **candidate.as_dict(),
+                    "risk_capital_mode": risk_mode,
+                    "simulation_capital": (
+                        settings.simulation_capital if _using_simulation() else None
+                    ),
+                    "execution_enabled": False,
+                }
+            ),
         )
     )
     db.add(
@@ -1039,6 +1048,7 @@ async def promote_phase_one_candidate(
             payload_json=json.dumps(
                 {
                     "proposal_id": intent.id,
+                    "risk_capital_mode": risk_mode,
                     "candidate": candidate.as_dict(),
                     "risk_reasons": list(result.reasons),
                     "trade_limit": str(result.trade_limit),
@@ -1057,6 +1067,8 @@ async def promote_phase_one_candidate(
         "risk_reasons": list(result.reasons),
         "execution_enabled": False,
         "trading_mode": settings.trading_mode.value,
+        "risk_capital_mode": risk_mode,
+        "simulation": _using_simulation(),
     }
 
 
