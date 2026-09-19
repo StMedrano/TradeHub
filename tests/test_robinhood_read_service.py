@@ -186,3 +186,21 @@ def test_markdown_table_total_returns_is_authoritative():
     value, authoritative = _parse_realized_pnl(payload)
     assert value == -5.5
     assert authoritative is True
+
+
+
+def test_explicit_no_realized_pnl_is_authoritative_zero():
+    value, authoritative = _parse_realized_pnl(
+        "No realized P&L data found for this period."
+    )
+    assert value == 0.0
+    assert authoritative is True
+
+
+def test_scoped_trade_history_no_trades_is_authoritative_zero():
+    value, authoritative = _parse_trade_history_daily_pnl(
+        "No trades found for the selected period.",
+        scoped_to_day=True,
+    )
+    assert value == 0.0
+    assert authoritative is True
