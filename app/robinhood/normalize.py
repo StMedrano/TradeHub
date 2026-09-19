@@ -27,6 +27,13 @@ def _decode_json_text(value: Any) -> Any:
             break
 
         candidate = decoded.strip()
+
+        # Only deserialize text that actually looks like a serialized
+        # structure. Ordinary field values such as "12.34" must remain
+        # strings; downstream numeric readers can convert them deliberately.
+        if candidate[:1] not in {"{", "[", "(", '"'}:
+            break
+
         parsed: Any = None
         parsed_ok = False
 
