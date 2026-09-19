@@ -1,5 +1,5 @@
 from decimal import Decimal
-from app.config import TradingMode
+from app.config import RiskCapitalMode, TradingMode
 from app.execution.gates import ExecutionGate
 from app.execution.multileg import LegExecution, LegState, MultiLegPlan
 from app.execution.pricing import OptionQuote, price_walk
@@ -58,3 +58,16 @@ def test_failed_second_leg_requires_unwind():
     plan.mark_second_leg_timeout()
     assert plan.second_leg.state == LegState.CANCELLED
     assert plan.risk_reducing_leg.state == LegState.UNWIND_REQUIRED
+
+
+
+def test_simulation_mode_blocks_orders_even_when_live():
+    allowed, reason = ExecutionGate(
+        mode=TradingMode.LIVE,
+        phase=1,
+        require_approval=False,
+        risk_capital_mode=RiskCapitalMode.SIMULATION,
+    ).may_place_order(approved=True)
+
+    assert not allowed
+    assert "Simulation capital mode" in reason
