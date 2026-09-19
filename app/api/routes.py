@@ -466,6 +466,31 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
         row["risk_preview_authoritative"] = risk_state.authoritative
         row["risk_approved"] = False
         row["risk_reasons"] = list(risk_state.reasons)
+        row["risk_preview_status"] = "portfolio_risk_unavailable"
+
+        if risk_state.authoritative and risk_state.snapshot is not None:
+            row["risk_preview_status"] = "candidate_precheck"
+
+            if candidate.strategy != "cash_secured_put":
+                row["risk_reasons"] = [
+                    "Covered-call promotion remains disabled until whole-position stock risk is authoritative."
+                ]
+                row["risk_preview_status"] = "unsupported_strategy"
+            elif candidate.buying_power_sufficient is False:
+                row["risk_reasons"] = list(candidate.reasons) or [
+                    "Estimated cash-secured collateral exceeds synchronized buying power."
+                ]
+                row["risk_preview_status"] = "insufficient_buying_power"
+            elif candidate.buying_power_sufficient is None:
+                row["risk_reasons"] = [
+                    "Synchronized buying power is unavailable."
+                ]
+                row["risk_preview_status"] = "buying_power_unavailable"
+            elif candidate.estimated_max_loss is None:
+                row["risk_reasons"] = [
+                    "Candidate maximum loss is unavailable."
+                ]
+                row["risk_preview_status"] = "max_loss_unavailable"
 
         if (
             risk_state.authoritative
@@ -490,6 +515,9 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             )
             row["risk_approved"] = preview.approved
             row["risk_reasons"] = list(preview.reasons)
+            row["risk_preview_status"] = (
+                "approved" if preview.approved else "risk_rejected"
+            )
             row["trade_limit"] = str(preview.trade_limit)
             row["portfolio_limit"] = str(preview.portfolio_limit)
             row["daily_loss_limit"] = str(preview.daily_loss_limit)
