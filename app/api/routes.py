@@ -568,13 +568,21 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             "A CSP can be promoted into the dry-run approval queue."
             if risk_state.authoritative and risk_approved_candidate_exists
             else (
-                "No CSP candidate for this symbol currently fits synchronized buying power."
-                if candidate_rows
-                and all(
-                    row.get("risk_preview_status") == "insufficient_buying_power"
-                    for row in candidate_rows
+                "No option contracts passed the configured market-data filters."
+                if not candidate_rows
+                and not any(item.passed for item in diagnostics)
+                else (
+                    "Contracts passed market filters, but no valid CSP/covered-call candidate could be formed from the synchronized quotes/account state."
+                    if not candidate_rows
+                    else (
+                        "No CSP candidate for this symbol currently fits synchronized buying power."
+                        if all(
+                            row.get("risk_preview_status") == "insufficient_buying_power"
+                            for row in candidate_rows
+                        )
+                        else "Candidates remain non-executable until all authoritative risk gates pass."
+                    )
                 )
-                else "Candidates remain non-executable until all authoritative risk gates pass."
             )
         ),
         "tool_errors": scan.tool_errors,
