@@ -29,3 +29,10 @@ class PauseAck(BaseModel):
 class CandidatePromotionRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=16)
     option_id: str = Field(min_length=1, max_length=128)
+
+
+
+class SimulationCloseRequest(BaseModel):
+    exit_debit: Decimal = Field(ge=0)
+    actor: str = Field(min_length=1, max_length=128)
+    note: str = Field(default="", max_length=2000)
