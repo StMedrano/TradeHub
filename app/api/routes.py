@@ -16,7 +16,7 @@ from app.risk.state import portfolio_risk_state_service
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.read_service import robinhood_read_service
 from app.robinhood.market_data import robinhood_market_data
-from app.robinhood.normalize import payload_shape
+from app.robinhood.normalize import payload_shape, redacted_text_fingerprint
 from app.robinhood.schema_args import build_arguments
 from app.strategy.candidates import phase_one_candidate_engine
 
@@ -763,6 +763,7 @@ async def robinhood_pnl_diagnostics():
                 "schema": schema,
                 "arguments": safe_args,
                 "response_shape": payload_shape(payload),
+                "response_fingerprint": redacted_text_fingerprint(payload),
             }
 
             if tool_name == "get_realized_pnl":
