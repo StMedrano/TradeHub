@@ -48,6 +48,7 @@ def health():
         "trading_mode": settings.trading_mode,
         "phase": settings.phase,
         "robinhood_mcp_enabled": settings.robinhood_mcp_enabled,
+        "robinhood_spreads_enabled": settings.robinhood_spreads_enabled,
         "robinhood_only": True,
     }
 
@@ -72,6 +73,20 @@ def approvals(db: Session = Depends(db_session)):
 
 @router.post("/risk/check")
 def risk_check(body: RiskCheckRequest, db: Session = Depends(db_session)):
+    if (
+        body.strategy in {
+            StrategyType.BULL_PUT_SPREAD,
+            StrategyType.BEAR_CALL_SPREAD,
+            StrategyType.IRON_CONDOR,
+            StrategyType.DEBIT_SPREAD,
+        }
+        and not settings.robinhood_spreads_enabled
+    ):
+        raise HTTPException(
+            409,
+            "Spread strategies are disabled for this Robinhood account.",
+        )
+
     intent = TradeIntent(
         strategy=body.strategy,
         underlying=body.underlying.upper(),
