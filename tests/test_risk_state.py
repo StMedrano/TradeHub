@@ -1,9 +1,10 @@
+from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db import Base
 from app.persistence.models import TradeProposal
-from app.risk.state import PortfolioRiskStateService
+from app.risk.state import PortfolioRiskStateService, SimulationRiskStateService
 from app.robinhood.read_service import RobinhoodSnapshot
 
 
@@ -91,3 +92,65 @@ def test_active_proposal_reserves_phase_one_slot():
 
     assert state.authoritative is False
     assert any("active TradeHub proposal" in reason for reason in state.reasons)
+
+
+
+def test_live_risk_ignores_simulation_proposals():
+    db = make_session()
+    db.add(
+        TradeProposal(
+            id="sim-proposal-1",
+            underlying="ABC",
+            strategy="cash_secured_put",
+            contracts=1,
+            known_max_loss=400,
+            status="pending_approval",
+            risk_reasons="",
+        )
+    )
+    db.commit()
+
+    state = PortfolioRiskStateService().build(db, clean_snapshot())
+
+    assert state.authoritative is True
+    assert state.snapshot is not None
+    assert state.snapshot.concurrent_positions == 0
+
+
+def test_simulation_risk_only_counts_simulation_proposals():
+    db = make_session()
+    db.add_all(
+        [
+            TradeProposal(
+                id="sim-proposal-1",
+                underlying="ABC",
+                strategy="cash_secured_put",
+                contracts=1,
+                known_max_loss=400,
+                status="pending_approval",
+                risk_reasons="",
+            ),
+            TradeProposal(
+                id="live-proposal-1",
+                underlying="XYZ",
+                strategy="cash_secured_put",
+                contracts=1,
+                known_max_loss=2000,
+                status="pending_approval",
+                risk_reasons="",
+            ),
+        ]
+    )
+    db.commit()
+
+    state = SimulationRiskStateService().build(
+        db,
+        capital=Decimal("10000"),
+    )
+
+    assert state.authoritative is True
+    assert state.snapshot is not None
+    assert state.snapshot.equity == Decimal("10000")
+    assert state.snapshot.open_position_max_loss == Decimal("400.0")
+    assert state.snapshot.concurrent_positions == 1
+    assert state.snapshot.realized_pnl_today == Decimal("0")
