@@ -9,8 +9,8 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "expiration_date": ("expiration_date", "expiry", "expiration"),
     "option_type": ("option_type", "type", "side"),
     "account_number": ("account_number", "account_id", "rhs_account_number"),
-    "start_date": ("start_date", "from_date", "start"),
-    "end_date": ("end_date", "to_date", "end"),
+    "start_date": ("start_date", "from_date", "start", "since", "after", "date"),
+    "end_date": ("end_date", "to_date", "end", "until", "before"),
     "span": ("span", "period", "window"),
     "limit": ("limit", "page_size", "count"),
 }
