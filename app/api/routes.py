@@ -2,19 +2,20 @@ import json
 from decimal import Decimal
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import ApprovalAction, CandidatePromotionRequest, PauseAck, RiskCheckRequest
-from app.config import settings
+from app.config import RiskCapitalMode, settings
 from app.db import SessionLocal
 from app.domain.models import AccountRiskSnapshot, RiskPolicy, StrategyType, TradeIntent
 from app.persistence.models import AuditEvent, TradeProposal, TradeProposalDetail, UnderlyingPause
 from app.risk.manager import RiskManager
-from app.risk.state import portfolio_risk_state_service
+from app.risk.state import portfolio_risk_state_service, simulation_risk_state_service
 from app.robinhood.client import RobinhoodTradingMCP
-from app.robinhood.read_service import robinhood_read_service
+from app.robinhood.read_service import RobinhoodSnapshot, robinhood_read_service
 from app.robinhood.market_data import robinhood_market_data
 from app.robinhood.normalize import payload_shape, redacted_text_fingerprint
 from app.robinhood.schema_args import build_arguments
@@ -57,6 +58,55 @@ def _watchlist_symbols(raw: str | None) -> list[str]:
             f"Too many symbols. Maximum per scan is {settings.strategy_watchlist_max_symbols}.",
         )
     return values
+
+
+def _using_simulation() -> bool:
+    return settings.risk_capital_mode == RiskCapitalMode.SIMULATION
+
+
+def _effective_risk_state(db: Session):
+    if _using_simulation():
+        return simulation_risk_state_service.build(
+            db,
+            capital=Decimal(str(settings.simulation_capital)),
+        )
+    return portfolio_risk_state_service.build(
+        db,
+        robinhood_read_service.snapshot,
+    )
+
+
+def _strategy_account_snapshot(
+    risk_snapshot: AccountRiskSnapshot | None,
+) -> RobinhoodSnapshot:
+    if not _using_simulation():
+        return robinhood_read_service.snapshot
+
+    reserved = (
+        risk_snapshot.open_position_max_loss
+        if risk_snapshot is not None
+        else Decimal("0")
+    )
+    capital = Decimal(str(settings.simulation_capital))
+    available = max(capital - reserved, Decimal("0"))
+
+    return RobinhoodSnapshot(
+        connection_state="connected",
+        equity=float(capital),
+        buying_power=float(available),
+        cash=float(available),
+        realized_pnl_today=0.0,
+        realized_pnl_authoritative=True,
+        equity_positions=[],
+        option_positions=[],
+        open_equity_positions=0,
+        open_option_positions=0,
+        open_orders=0,
+    )
+
+
+def _risk_mode_label() -> str:
+    return settings.risk_capital_mode.value
 
 
 def _account_csp_capacity(
