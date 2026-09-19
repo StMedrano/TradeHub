@@ -176,6 +176,9 @@ def health():
     return {
         "status": "ok",
         "trading_mode": settings.trading_mode,
+        "risk_capital_mode": settings.risk_capital_mode,
+        "simulation_capital": settings.simulation_capital if _using_simulation() else None,
+        "simulation_execution_prohibited": _using_simulation(),
         "phase": settings.phase,
         "robinhood_mcp_enabled": settings.robinhood_mcp_enabled,
         "robinhood_spreads_enabled": settings.robinhood_spreads_enabled,
