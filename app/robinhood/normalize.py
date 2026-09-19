@@ -34,11 +34,19 @@ def _decode_json_text(value: Any) -> Any:
 
 
 def normalize_mcp_data(value: Any) -> Any:
-    """Normalize top-level JSON text returned through MCP structured content."""
+    """Recursively normalize JSON text returned through MCP payloads."""
     decoded = _decode_json_text(value)
-    if decoded is not value:
-        return decoded
-    return value
+
+    if isinstance(decoded, dict):
+        return {
+            key: normalize_mcp_data(child)
+            for key, child in decoded.items()
+        }
+
+    if isinstance(decoded, list):
+        return [normalize_mcp_data(child) for child in decoded]
+
+    return decoded
 
 
 def mcp_result_to_data(result: Any) -> Any:
