@@ -2,13 +2,52 @@ import json
 from typing import Any
 
 
+def _decode_json_text(value: Any) -> Any:
+    """Decode JSON-ish MCP text without inventing structure for plain text."""
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text:
+        return value
+
+    if text.startswith("```") and text.endswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            body = lines[1:-1]
+            if body and body[0].strip().lower() in {"json", "javascript"}:
+                body = body[1:]
+            text = "\n".join(body).strip()
+
+    decoded: Any = text
+    for _ in range(2):
+        if not isinstance(decoded, str):
+            break
+        candidate = decoded.strip()
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            break
+        decoded = parsed
+
+    return decoded
+
+
+def normalize_mcp_data(value: Any) -> Any:
+    """Normalize top-level JSON text returned through MCP structured content."""
+    decoded = _decode_json_text(value)
+    if decoded is not value:
+        return decoded
+    return value
+
+
 def mcp_result_to_data(result: Any) -> Any:
     """Convert an MCP CallToolResult into ordinary Python data when possible."""
     structured = getattr(result, "structuredContent", None)
     if structured is None:
         structured = getattr(result, "structured_content", None)
     if structured is not None:
-        return structured
+        return normalize_mcp_data(structured)
 
     blocks = getattr(result, "content", None) or []
     values: list[Any] = []
@@ -17,10 +56,7 @@ def mcp_result_to_data(result: Any) -> Any:
         text = getattr(block, "text", None)
         if text is None:
             continue
-        try:
-            values.append(json.loads(text))
-        except (json.JSONDecodeError, TypeError):
-            values.append(text)
+        values.append(_decode_json_text(text))
 
     if len(values) == 1:
         return values[0]
