@@ -137,3 +137,30 @@ def test_trade_history_unscoped_payload_does_not_unlock_risk():
     )
     assert value is None
     assert authoritative is False
+
+
+
+def test_total_returns_is_authoritative():
+    payload = {
+        "account_number": "redacted",
+        "window": "day",
+        "data_points": [],
+        "total_returns": "-7.50",
+    }
+    value, authoritative = _parse_realized_pnl(payload)
+    assert value == -7.5
+    assert authoritative is True
+
+
+def test_labeled_plain_text_pnl_is_authoritative():
+    payload = "Window: day\nTotal Returns: $12.34\nTrades: 2"
+    value, authoritative = _parse_realized_pnl(payload)
+    assert value == 12.34
+    assert authoritative is True
+
+
+def test_labeled_plain_text_parentheses_are_negative():
+    payload = "Total Realized P&L: ($8.25)"
+    value, authoritative = _parse_realized_pnl(payload)
+    assert value == -8.25
+    assert authoritative is True
