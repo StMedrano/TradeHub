@@ -345,7 +345,7 @@ class PhaseOneCandidateEngine:
                 candidate_reasons: list[str] = []
                 if bp_ok is False:
                     candidate_reasons.append(
-                        "Estimated cash-secured collateral exceeds synchronized buying power."
+                        "Estimated cash-secured collateral exceeds available risk-capital buying power."
                     )
 
                 results.append(
