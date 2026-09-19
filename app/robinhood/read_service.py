@@ -88,24 +88,31 @@ def _find_labeled_pnl_text(value: Any) -> float | None:
     if not isinstance(value, str):
         return None
 
-    patterns = (
-        r'(?im)^\s*\|?\s*(?:total[_\s-]*returns?|total[_\s-]*realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)\s*\)?',
-        r'(?im)^\s*\|?\s*(?:realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)\s*\)?',
+    label_patterns = (
+        r"(?:total[_\s-]*returns?|total[_\s-]*realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))",
+        r"(?:realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))",
     )
-    for pattern in patterns:
+
+    for label in label_patterns:
+        pattern = (
+            rf"(?im)^\s*\|?\s*{label}\s*[:=|]\s*"
+            r"(?P<sign>[-+]?)\s*(?P<paren>\()?\s*\$?\s*"
+            r"(?P<number>\d[\d,]*(?:\.\d+)?)\s*\)?"
+        )
         match = re.search(pattern, value)
         if not match:
             continue
-        raw = match.group(1).replace(",", "")
+
         try:
-            parsed = float(raw)
+            parsed = float(match.group("number").replace(",", ""))
         except ValueError:
             continue
-        # Parentheses after the label are commonly used for negative currency.
-        line = match.group(0)
-        if "(" in line and ")" in line and parsed > 0:
-            parsed = -parsed
+
+        if match.group("sign") == "-" or match.group("paren"):
+            parsed = -abs(parsed)
+
         return parsed
+
     return None
 
 
