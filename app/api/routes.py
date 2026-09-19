@@ -446,6 +446,10 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             scan,
             robinhood_read_service.snapshot,
         )
+        spread_candidates = phase_one_candidate_engine.generate_bull_put_spreads(
+            scan,
+            robinhood_read_service.snapshot,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -526,6 +530,38 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
 
         candidate_rows.append(row)
 
+    defined_risk_alternatives = []
+    for spread in spread_candidates:
+        row = spread.as_dict()
+        row["risk_preview_authoritative"] = risk_state.authoritative
+        row["risk_preview_approved"] = False
+        row["risk_reasons"] = list(risk_state.reasons)
+        row["promotion_enabled"] = False
+        row["execution_enabled"] = False
+        row["rollout_status"] = "preview_only"
+
+        if risk_state.authoritative and risk_state.snapshot is not None:
+            preview_intent = TradeIntent(
+                strategy=StrategyType.BULL_PUT_SPREAD,
+                underlying=spread.symbol,
+                contracts=spread.contracts,
+                known_max_loss=spread.estimated_max_loss,
+                has_short_put=True,
+                is_defined_risk=True,
+            )
+            preview = risk_manager.evaluate(
+                preview_intent,
+                risk_state.snapshot,
+                current_policy(),
+            )
+            row["risk_preview_approved"] = preview.approved
+            row["risk_reasons"] = list(preview.reasons)
+            row["trade_limit"] = str(preview.trade_limit)
+            row["portfolio_limit"] = str(preview.portfolio_limit)
+            row["daily_loss_limit"] = str(preview.daily_loss_limit)
+
+        defined_risk_alternatives.append(row)
+
     return {
         "symbol": scan.symbol,
         "scanned_at": scan.scanned_at,
@@ -533,6 +569,7 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
         "selected_expirations": scan.selected_expirations,
         "strike_search_count": scan.strike_search_count,
         "candidates": candidate_rows,
+        "defined_risk_alternatives": defined_risk_alternatives,
         "diagnostics": [item.as_dict() for item in diagnostics],
         "passed_contracts": sum(1 for item in diagnostics if item.passed),
         "rejected_contracts": sum(1 for item in diagnostics if not item.passed),
@@ -544,6 +581,8 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             "short_delta_min": settings.strategy_short_delta_min,
             "short_delta_max": settings.strategy_short_delta_max,
             "max_spread_pct": settings.liquidity_max_spread_pct * 100,
+            "vertical_max_width": settings.strategy_vertical_max_width,
+            "vertical_min_credit": settings.strategy_vertical_min_credit,
         },
         "portfolio_risk_authoritative": risk_state.authoritative,
         "risk_state_reasons": list(risk_state.reasons),
