@@ -411,9 +411,14 @@ def dashboard_summary(db: Session = Depends(db_session)):
         if risk_state.authoritative and risk_state.snapshot is not None
         else None
     )
+    authoritative_risk_equity = (
+        float(risk_state.snapshot.equity)
+        if risk_state.authoritative and risk_state.snapshot is not None
+        else None
+    )
     risk_utilization_pct = (
-        authoritative_open_risk / snapshot.equity * 100
-        if authoritative_open_risk is not None and snapshot.equity
+        authoritative_open_risk / authoritative_risk_equity * 100
+        if authoritative_open_risk is not None and authoritative_risk_equity
         else None
     )
 
@@ -445,11 +450,7 @@ def dashboard_summary(db: Session = Depends(db_session)):
             settings.simulation_capital if _using_simulation() else None
         ),
         "simulation_execution_prohibited": _using_simulation(),
-        "risk_equity": (
-            float(risk_state.snapshot.equity)
-            if risk_state.authoritative and risk_state.snapshot is not None
-            else None
-        ),
+        "risk_equity": authoritative_risk_equity,
         "phase": settings.phase,
         "require_approval": settings.require_approval,
         "robinhood_mcp_enabled": settings.robinhood_mcp_enabled,
