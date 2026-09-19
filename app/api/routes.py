@@ -199,6 +199,12 @@ def approvals(db: Session = Depends(db_session)):
             "strategy": x.strategy,
             "contracts": x.contracts,
             "known_max_loss": x.known_max_loss,
+            "risk_capital_mode": (
+                RiskCapitalMode.SIMULATION.value
+                if x.id.startswith("sim-")
+                else RiskCapitalMode.LIVE_ACCOUNT.value
+            ),
+            "execution_enabled": False,
             "created_at": x.created_at,
         }
         for x in rows
@@ -299,7 +305,16 @@ def approve(proposal_id: str, action: ApprovalAction, db: Session = Depends(db_s
         )
     )
     db.commit()
-    return {"status": "approved", "proposal_id": p.id}
+    return {
+        "status": "approved",
+        "proposal_id": p.id,
+        "risk_capital_mode": (
+            RiskCapitalMode.SIMULATION.value
+            if p.id.startswith("sim-")
+            else RiskCapitalMode.LIVE_ACCOUNT.value
+        ),
+        "execution_enabled": False,
+    }
 
 @router.post("/approvals/{proposal_id}/reject")
 def reject(proposal_id: str, action: ApprovalAction, db: Session = Depends(db_session)):
@@ -371,7 +386,7 @@ def dashboard_summary(db: Session = Depends(db_session)):
     ).all()
 
     snapshot = robinhood_read_service.snapshot
-    risk_state = portfolio_risk_state_service.build(db, snapshot)
+    risk_state = _effective_risk_state(db)
     authoritative_open_risk = (
         float(risk_state.snapshot.open_position_max_loss)
         if risk_state.authoritative and risk_state.snapshot is not None
@@ -406,6 +421,16 @@ def dashboard_summary(db: Session = Depends(db_session)):
         "pending_approvals": len(pending),
         "paused_underlyings": len(active_pauses),
         "trading_mode": settings.trading_mode.value,
+        "risk_capital_mode": _risk_mode_label(),
+        "simulation_capital": (
+            settings.simulation_capital if _using_simulation() else None
+        ),
+        "simulation_execution_prohibited": _using_simulation(),
+        "risk_equity": (
+            float(risk_state.snapshot.equity)
+            if risk_state.authoritative and risk_state.snapshot is not None
+            else None
+        ),
         "phase": settings.phase,
         "require_approval": settings.require_approval,
         "robinhood_mcp_enabled": settings.robinhood_mcp_enabled,
