@@ -586,14 +586,6 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
 
     try:
         scan = await robinhood_market_data.scan_symbol(symbol)
-        candidates = phase_one_candidate_engine.generate(
-            scan,
-            robinhood_read_service.snapshot,
-        )
-        diagnostics = phase_one_candidate_engine.diagnose(
-            scan,
-            robinhood_read_service.snapshot,
-        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -602,9 +594,15 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             f"Robinhood strategy scan failed: {exc}",
         ) from exc
 
-    risk_state = portfolio_risk_state_service.build(
-        db,
-        robinhood_read_service.snapshot,
+    risk_state = _effective_risk_state(db)
+    strategy_snapshot = _strategy_account_snapshot(risk_state.snapshot)
+    candidates = phase_one_candidate_engine.generate(
+        scan,
+        strategy_snapshot,
+    )
+    diagnostics = phase_one_candidate_engine.diagnose(
+        scan,
+        strategy_snapshot,
     )
     candidate_rows = []
     risk_approved_candidate_exists = False
@@ -712,6 +710,8 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
             "max_spread_pct": settings.liquidity_max_spread_pct * 100,
         },
         "portfolio_risk_authoritative": risk_state.authoritative,
+        "risk_capital_mode": _risk_mode_label(),
+        "simulation_capital": settings.simulation_capital if _using_simulation() else None,
         "risk_state_reasons": list(risk_state.reasons),
         "approval_ready": risk_state.authoritative and risk_approved_candidate_exists,
         "execution_enabled": False,
