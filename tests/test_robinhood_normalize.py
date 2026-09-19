@@ -3,6 +3,7 @@ from app.robinhood.normalize import (
     find_first_list,
     find_first_number,
     mcp_result_to_data,
+    redacted_text_fingerprint,
 )
 
 
@@ -108,3 +109,36 @@ def test_mcp_result_recursively_decodes_nested_json_strings():
             ]
         }
     }
+
+
+
+def test_mcp_result_decodes_python_literal_structured_content():
+    payload = _FakeResult(
+        "{'data': {'results': [{'realized_pnl': '4.56'}]}}"
+    )
+
+    decoded = mcp_result_to_data(payload)
+
+    assert decoded == {
+        "data": {
+            "results": [
+                {"realized_pnl": "4.56"}
+            ]
+        }
+    }
+
+
+def test_redacted_text_fingerprint_masks_values_and_ids():
+    payload = (
+        "Account: RH123456789\n"
+        "Total Returns: $123.45\n"
+        "Date: 2026-09-18"
+    )
+
+    fingerprint = redacted_text_fingerprint(payload)
+
+    assert fingerprint is not None
+    rendered = "\n".join(fingerprint["lines"])
+    assert "123.45" not in rendered
+    assert "RH123456789" not in rendered
+    assert "Total Returns" in rendered
