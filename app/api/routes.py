@@ -915,6 +915,12 @@ async def account_fit_opportunities(
                 for reason in preview.reasons:
                     rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
                 near_miss = candidate.as_dict()
+                required_equity = (
+                    candidate.estimated_max_loss / policy.max_trade_loss_pct
+                    if candidate.estimated_max_loss is not None
+                    and policy.max_trade_loss_pct > 0
+                    else None
+                )
                 near_miss.update(
                     {
                         "risk_approved": False,
@@ -923,6 +929,11 @@ async def account_fit_opportunities(
                         "trade_limit": str(preview.trade_limit),
                         "portfolio_limit": str(preview.portfolio_limit),
                         "daily_loss_limit": str(preview.daily_loss_limit),
+                        "minimum_equity_for_trade_limit": (
+                            str(required_equity)
+                            if required_equity is not None
+                            else None
+                        ),
                         "execution_enabled": False,
                         "mechanical_only": True,
                     }
