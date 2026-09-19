@@ -828,6 +828,7 @@ async def account_fit_opportunities(
         policy,
     )
     matches: list[dict[str, object]] = []
+    near_misses: list[dict[str, object]] = []
     scanned: list[dict[str, object]] = []
 
     for symbol in requested_symbols:
@@ -865,12 +866,34 @@ async def account_fit_opportunities(
                     else "Buying power is insufficient or unavailable."
                 )
                 rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                near_miss = candidate.as_dict()
+                near_miss.update(
+                    {
+                        "risk_approved": False,
+                        "rejection_stage": "buying_power",
+                        "risk_reasons": [reason],
+                        "execution_enabled": False,
+                        "mechanical_only": True,
+                    }
+                )
+                near_misses.append(near_miss)
                 continue
 
             buying_power_fit += 1
             if candidate.estimated_max_loss is None:
                 reason = "Candidate maximum loss is unavailable."
                 rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                near_miss = candidate.as_dict()
+                near_miss.update(
+                    {
+                        "risk_approved": False,
+                        "rejection_stage": "max_loss",
+                        "risk_reasons": [reason],
+                        "execution_enabled": False,
+                        "mechanical_only": True,
+                    }
+                )
+                near_misses.append(near_miss)
                 continue
 
             intent = TradeIntent(
@@ -891,6 +914,20 @@ async def account_fit_opportunities(
             if not preview.approved:
                 for reason in preview.reasons:
                     rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                near_miss = candidate.as_dict()
+                near_miss.update(
+                    {
+                        "risk_approved": False,
+                        "rejection_stage": "risk_manager",
+                        "risk_reasons": list(preview.reasons),
+                        "trade_limit": str(preview.trade_limit),
+                        "portfolio_limit": str(preview.portfolio_limit),
+                        "daily_loss_limit": str(preview.daily_loss_limit),
+                        "execution_enabled": False,
+                        "mechanical_only": True,
+                    }
+                )
+                near_misses.append(near_miss)
                 continue
 
             risk_passes += 1
@@ -935,6 +972,13 @@ async def account_fit_opportunities(
             str(row.get("expiration_date") or ""),
         )
     )
+    near_misses.sort(
+        key=lambda row: (
+            float(row.get("estimated_max_loss") or "999999999"),
+            -float(row.get("score") or 0),
+            str(row.get("symbol") or ""),
+        )
+    )
 
     return {
         "symbols": requested_symbols,
@@ -944,6 +988,8 @@ async def account_fit_opportunities(
         "account_capacity": capacity,
         "mechanical_matches": matches,
         "match_count": len(matches),
+        "near_misses": near_misses[:10],
+        "near_miss_count": len(near_misses),
         "scan_summary": scanned,
         "execution_enabled": False,
         "trading_mode": settings.trading_mode.value,
