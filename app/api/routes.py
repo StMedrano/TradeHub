@@ -1,5 +1,7 @@
 import json
 from decimal import Decimal
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +16,8 @@ from app.risk.state import portfolio_risk_state_service
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.read_service import robinhood_read_service
 from app.robinhood.market_data import robinhood_market_data
+from app.robinhood.normalize import payload_shape
+from app.robinhood.schema_args import build_arguments
 from app.strategy.candidates import phase_one_candidate_engine
 
 router = APIRouter(prefix="/api")
@@ -669,3 +673,107 @@ async def promote_phase_one_candidate(
         "execution_enabled": False,
         "trading_mode": settings.trading_mode.value,
     }
+
+
+
+@router.get("/robinhood/pnl-diagnostics")
+async def robinhood_pnl_diagnostics():
+    """Safe diagnostics for Robinhood P&L tools.
+
+    Returns schemas and response shapes only. It does not expose account numbers
+    or raw trade/P&L payload values.
+    """
+    if not settings.robinhood_mcp_enabled:
+        raise HTTPException(409, "Robinhood MCP is disabled.")
+
+    account_number = robinhood_read_service.snapshot.agentic_account_number
+    if not account_number:
+        raise HTTPException(409, "Agentic account number is not synchronized.")
+
+    catalog = await robinhood.tool_catalog()
+    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    result: dict[str, object] = {
+        "market_date": today,
+        "account_number_present": True,
+        "tools": {},
+    }
+
+    for tool_name in ("get_realized_pnl", "get_pnl_trade_history"):
+        tool = catalog.get(tool_name)
+        if not tool:
+            result["tools"][tool_name] = {
+                "advertised": False,
+            }
+            continue
+
+        schema = tool.get("input_schema") or {}
+        context = {
+            "account_number": account_number,
+            "start_date": today,
+            "end_date": today,
+            "span": "day",
+            "limit": 500,
+        }
+
+        try:
+            args = build_arguments(schema, context)
+        except Exception as exc:
+            result["tools"][tool_name] = {
+                "advertised": True,
+                "schema": schema,
+                "argument_build_error": str(exc),
+            }
+            continue
+
+        safe_args = {
+            key: {
+                "type": type(value).__name__,
+                "value": (
+                    "<redacted>"
+                    if "account" in key.lower()
+                    else value
+                ),
+            }
+            for key, value in args.items()
+        }
+
+        try:
+            payload = await robinhood.call(tool_name, args)
+            tool_result = {
+                "advertised": True,
+                "schema": schema,
+                "arguments": safe_args,
+                "response_shape": payload_shape(payload),
+            }
+
+            if tool_name == "get_realized_pnl":
+                from app.robinhood.read_service import _parse_realized_pnl
+                parsed, authoritative = _parse_realized_pnl(payload)
+                tool_result["parsed_value"] = parsed
+                tool_result["parser_authoritative"] = authoritative
+            else:
+                from app.robinhood.read_service import _parse_trade_history_daily_pnl
+                scope_fields = {
+                    "start_date", "from_date", "start", "since", "after", "date",
+                    "end_date", "to_date", "end", "until", "before",
+                    "span", "period", "window",
+                }
+                scoped_to_day = any(key in args for key in scope_fields)
+                parsed, authoritative = _parse_trade_history_daily_pnl(
+                    payload,
+                    scoped_to_day=scoped_to_day,
+                )
+                tool_result["scoped_to_day"] = scoped_to_day
+                tool_result["parsed_value"] = parsed
+                tool_result["parser_authoritative"] = authoritative
+
+            result["tools"][tool_name] = tool_result
+        except Exception as exc:
+            result["tools"][tool_name] = {
+                "advertised": True,
+                "schema": schema,
+                "arguments": safe_args,
+                "error": str(exc),
+            }
+
+    return result
