@@ -219,6 +219,69 @@ These values must be configuration settings, not literals buried in scanner code
 
 Existing Phase 1 risk limits remain separate hard gates and must never be weakened automatically to increase match count.
 
+## 9.1 Component boundaries
+
+The implementation should keep the whole-market subsystem out of the existing large API route module as much as possible.
+
+### RobinhoodScannerService
+
+Responsibility:
+
+- discover live scanner schemas,
+- manage TradeHub-owned saved scans,
+- run saved scans,
+- normalize Robinhood scanner rows into symbol-level records.
+
+It depends only on the Robinhood MCP client and schema/normalization helpers. It does not know about options risk or proposals.
+
+### MarketUniverseCoordinator
+
+Responsibility:
+
+- create/resume persisted scan runs,
+- combine scanner slices,
+- deduplicate symbols,
+- apply queue priority/fairness,
+- checkpoint progress,
+- produce aggregate scan counts.
+
+It depends on `RobinhoodScannerService`, persistence, and the equity prefilter.
+
+### EquityPrefilter
+
+Responsibility:
+
+- enforce tradability,
+- price/liquidity/market-cap rules,
+- earnings exclusion,
+- account-capital prioritization.
+
+It returns explicit pass/fail reasons. It does not call the option candidate engine.
+
+### OptionDeepScanService
+
+Responsibility:
+
+- call the existing `RobinhoodMarketDataService.scan_symbol()`,
+- pass normalized contracts into the existing Phase 1 candidate engine,
+- invoke the existing RiskManager,
+- persist matches and near misses.
+
+It must not duplicate candidate/risk formulas.
+
+### MarketScanWorker
+
+Responsibility:
+
+- consume one persisted queued run at a time,
+- execute discovery and deep-scan batches,
+- honor configured concurrency and per-cycle caps,
+- checkpoint progress,
+- mark runs complete/partial/failed,
+- resume interrupted runs after restart.
+
+The worker never receives Robinhood order-placement capabilities.
+
 ## 10. Scanner scheduling and batching
 
 A whole-market sweep must be bounded.
@@ -362,15 +425,19 @@ Returns current/last scan status and aggregate counts.
 
 ### POST /api/market-scanner/run
 
-Starts one bounded market scan cycle.
+Queues one bounded market scan cycle.
 
 Requirements:
 
 - Robinhood MCP enabled.
 - Only one active whole-market scan at a time.
-- Returns the scan run ID.
+- Persists a `MarketScanRun` in `queued` state before returning.
+- Returns the scan run ID immediately after the run is persisted.
 - Does not place orders.
-- In initial implementation, scan execution may be synchronous/bounded or driven by an in-process worker, but state must be persisted so restart behavior is explicit.
+- A single in-process scan worker consumes persisted queued runs.
+- The worker checkpoints symbol/run progress in the database after each bounded batch.
+- On application startup, a run left in `discovering` or `deep_scanning` is moved back to `queued` and resumes from persisted symbol state rather than starting a duplicate run.
+- No Redis, Celery, or external queue is required for the first implementation.
 
 ### GET /api/market-scanner/runs/{run_id}
 
