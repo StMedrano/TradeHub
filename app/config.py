@@ -6,6 +6,10 @@ class TradingMode(StrEnum):
     DRY_RUN = "dry_run"
     LIVE = "live"
 
+class RiskCapitalMode(StrEnum):
+    LIVE_ACCOUNT = "live_account"
+    SIMULATION = "simulation"
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -14,6 +18,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./tradehub.db"
 
     trading_mode: TradingMode = TradingMode.DRY_RUN
+    risk_capital_mode: RiskCapitalMode = RiskCapitalMode.LIVE_ACCOUNT
+    simulation_capital: float = Field(default=10000.0, gt=0)
     phase: int = Field(default=0, ge=0, le=2)
     require_approval: bool = True
     max_concurrent_positions: int = Field(default=1, ge=1)
