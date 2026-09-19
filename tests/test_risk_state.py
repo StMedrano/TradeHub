@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db import Base
-from app.persistence.models import TradeProposal
+from app.persistence.models import SimulationPosition, TradeProposal
 from app.risk.state import PortfolioRiskStateService, SimulationRiskStateService
 from app.robinhood.read_service import RobinhoodSnapshot
 
@@ -154,3 +154,70 @@ def test_simulation_risk_only_counts_simulation_proposals():
     assert state.snapshot.open_position_max_loss == Decimal("400.0")
     assert state.snapshot.concurrent_positions == 1
     assert state.snapshot.realized_pnl_today == Decimal("0")
+
+
+
+def test_simulation_open_position_reserves_risk():
+    db = make_session()
+    db.add(
+        SimulationPosition(
+            id="simpos-1",
+            proposal_id="sim-proposal-1",
+            underlying="ABC",
+            strategy="cash_secured_put",
+            option_id="option-1",
+            contracts=1,
+            strike_price=Decimal("30"),
+            expiration_date="2026-10-16",
+            entry_credit=Decimal("100"),
+            known_max_loss=Decimal("2900"),
+            status="open",
+        )
+    )
+    db.commit()
+
+    state = SimulationRiskStateService().build(
+        db,
+        capital=Decimal("100000"),
+    )
+
+    assert state.authoritative is True
+    assert state.snapshot is not None
+    assert state.snapshot.open_position_max_loss == Decimal("2900.0000")
+    assert state.snapshot.concurrent_positions == 1
+
+
+def test_closed_simulation_position_releases_risk_and_tracks_today_pnl():
+    from datetime import datetime, timezone
+
+    db = make_session()
+    db.add(
+        SimulationPosition(
+            id="simpos-1",
+            proposal_id="sim-proposal-1",
+            underlying="ABC",
+            strategy="cash_secured_put",
+            option_id="option-1",
+            contracts=1,
+            strike_price=Decimal("30"),
+            expiration_date="2026-10-16",
+            entry_credit=Decimal("100"),
+            known_max_loss=Decimal("2900"),
+            status="closed",
+            exit_debit=Decimal("40"),
+            realized_pnl=Decimal("60"),
+            closed_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
+    state = SimulationRiskStateService().build(
+        db,
+        capital=Decimal("100000"),
+    )
+
+    assert state.authoritative is True
+    assert state.snapshot is not None
+    assert state.snapshot.open_position_max_loss == Decimal("0")
+    assert state.snapshot.concurrent_positions == 0
+    assert state.snapshot.realized_pnl_today == Decimal("60.0000")
