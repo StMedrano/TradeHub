@@ -70,8 +70,8 @@ def _find_labeled_pnl_text(value: Any) -> float | None:
         return None
 
     patterns = (
-        r'(?im)^\s*(?:total[_\s-]*returns?|total[_\s-]*realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)',
-        r'(?im)^\s*(?:realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)',
+        r'(?im)^\s*\|?\s*(?:total[_\s-]*returns?|total[_\s-]*realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)\s*\)?',
+        r'(?im)^\s*\|?\s*(?:realized[_\s-]*(?:p&l|pnl|gain(?:_loss)?))\s*[:=|]\s*\$?\(?\s*([-+]?\d[\d,]*(?:\.\d+)?)\s*\)?',
     )
     for pattern in patterns:
         match = re.search(pattern, value)
