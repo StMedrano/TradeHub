@@ -668,12 +668,12 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
                 row["risk_preview_status"] = "unsupported_strategy"
             elif candidate.buying_power_sufficient is False:
                 row["risk_reasons"] = list(candidate.reasons) or [
-                    "Estimated cash-secured collateral exceeds synchronized buying power."
+                    "Estimated cash-secured collateral exceeds available risk-capital buying power."
                 ]
                 row["risk_preview_status"] = "insufficient_buying_power"
             elif candidate.buying_power_sufficient is None:
                 row["risk_reasons"] = [
-                    "Synchronized buying power is unavailable."
+                    "Active risk-capital buying power is unavailable."
                 ]
                 row["risk_preview_status"] = "buying_power_unavailable"
             elif candidate.estimated_max_loss is None:
@@ -770,7 +770,7 @@ async def phase_one_candidates(symbol: str, db: Session = Depends(db_session)):
                     "Contracts passed market filters, but no valid CSP/covered-call candidate could be formed from the synchronized quotes/account state."
                     if not candidate_rows
                     else (
-                        "No CSP candidate for this symbol currently fits synchronized buying power."
+                        "No CSP candidate for this symbol currently fits the active risk-capital buying power."
                         if all(
                             row.get("risk_preview_status") == "insufficient_buying_power"
                             for row in candidate_rows
@@ -915,7 +915,7 @@ async def account_fit_opportunities(
                     1
                     for item in phase_one_candidate_engine.diagnose(
                         scan,
-                        robinhood_read_service.snapshot,
+                        strategy_snapshot,
                     )
                     if item.passed
                 ),
