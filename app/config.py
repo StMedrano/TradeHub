@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     robinhood_mcp_url: str = "https://agent.robinhood.com/mcp/trading"
     robinhood_mcp_enabled: bool = False
     robinhood_oauth_store: str = "/data/robinhood_oauth.json"
+    robinhood_account_store: str = "/data/robinhood_account.json"
     robinhood_oauth_redirect_uri: str = "http://localhost:33418/callback"
     robinhood_sync_interval_seconds: int = Field(default=30, ge=10, le=3600)
     alert_provider: str = "disabled"
