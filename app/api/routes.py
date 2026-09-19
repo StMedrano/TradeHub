@@ -304,6 +304,8 @@ def robinhood_status():
         "realized_pnl_today": snapshot.realized_pnl_today,
         "realized_pnl_authoritative": snapshot.realized_pnl_authoritative,
         "realized_pnl_shape": snapshot.realized_pnl_shape,
+        "realized_pnl_source": snapshot.realized_pnl_source,
+        "pnl_trade_history_shape": snapshot.pnl_trade_history_shape,
     }
 
 
