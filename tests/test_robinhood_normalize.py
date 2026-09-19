@@ -2,6 +2,7 @@ from app.robinhood.normalize import (
     count_records,
     find_first_list,
     find_first_number,
+    mcp_result_to_data,
 )
 
 
@@ -55,3 +56,36 @@ def test_is_effectively_empty_nested_payload():
 
     assert is_effectively_empty({"data": {"results": []}})
     assert not is_effectively_empty({"data": {"realized_pnl": 0}})
+
+
+
+class _FakeResult:
+    def __init__(self, structured):
+        self.structuredContent = structured
+        self.content = []
+
+
+def test_mcp_result_decodes_json_structured_content():
+    payload = _FakeResult(
+        '{"data":{"results":[{"realized_pnl":"12.34"}]}}'
+    )
+
+    decoded = mcp_result_to_data(payload)
+
+    assert decoded == {
+        "data": {
+            "results": [
+                {"realized_pnl": "12.34"}
+            ]
+        }
+    }
+
+
+def test_mcp_result_decodes_fenced_json_structured_content():
+    payload = _FakeResult(
+        '```json\n{"data":{"results":[]}}\n```'
+    )
+
+    decoded = mcp_result_to_data(payload)
+
+    assert decoded == {"data": {"results": []}}
