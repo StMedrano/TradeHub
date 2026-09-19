@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     strategy_max_dte: int = Field(default=60, ge=1, le=3650)
     strategy_short_delta_min: float = Field(default=0.15, ge=0, le=1)
     strategy_short_delta_max: float = Field(default=0.35, ge=0, le=1)
+    strategy_watchlist: str = ""
+    strategy_watchlist_max_symbols: int = Field(default=5, ge=1, le=20)
     entry_timeout_seconds: int = Field(default=90, ge=1)
     price_walk_increment: float = Field(default=0.01, gt=0)
     max_slippage_pct: float = Field(default=0.08, ge=0, le=1)
