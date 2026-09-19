@@ -1,4 +1,6 @@
+import ast
 import json
+import re
 from typing import Any
 
 
@@ -20,15 +22,35 @@ def _decode_json_text(value: Any) -> Any:
             text = "\n".join(body).strip()
 
     decoded: Any = text
-    for _ in range(2):
+    for _ in range(3):
         if not isinstance(decoded, str):
             break
+
         candidate = decoded.strip()
+        parsed: Any = None
+        parsed_ok = False
+
         try:
             parsed = json.loads(candidate)
+            parsed_ok = True
         except (json.JSONDecodeError, TypeError):
+            # Some MCP implementations serialize Python-style literal
+            # structures instead of strict JSON. literal_eval is restricted
+            # to Python literals and does not execute arbitrary code.
+            if candidate[:1] in {"{", "[", "("}:
+                try:
+                    parsed = ast.literal_eval(candidate)
+                    parsed_ok = isinstance(
+                        parsed,
+                        (dict, list, tuple, str, int, float, bool, type(None)),
+                    )
+                except (ValueError, SyntaxError, TypeError):
+                    parsed_ok = False
+
+        if not parsed_ok:
             break
-        decoded = parsed
+
+        decoded = list(parsed) if isinstance(parsed, tuple) else parsed
 
     return decoded
 
@@ -227,3 +249,42 @@ def payload_shape(value: Any, depth: int = 0, max_depth: int = 5) -> Any:
         }
 
     return {"type": type(value).__name__}
+
+
+
+def redacted_text_fingerprint(value: Any, max_lines: int = 16) -> dict[str, Any] | None:
+    """Return text structure/labels with numeric and identifier-like values masked."""
+    if not isinstance(value, str):
+        return None
+
+    lines: list[str] = []
+    for raw_line in value.splitlines()[:max_lines]:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # Mask UUIDs, long identifier-like tokens, currency/numeric values,
+        # percentages, and ISO-ish dates while preserving human-readable labels.
+        line = re.sub(
+            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F-]{20,}\b",
+            "<id>",
+            line,
+        )
+        line = re.sub(
+            r"\b(?=[A-Za-z0-9_-]{10,}\b)(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]+\b",
+            "<id>",
+            line,
+        )
+        line = re.sub(
+            r"(?<![A-Za-z])[-+]?\$?\(?\d[\d,]*(?:\.\d+)?\)?%?",
+            "<num>",
+            line,
+        )
+
+        lines.append(line[:240])
+
+    return {
+        "type": "plain_text",
+        "length": len(value),
+        "lines": lines,
+    }
