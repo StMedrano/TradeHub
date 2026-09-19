@@ -12,6 +12,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "start_date": ("start_date", "from_date", "start"),
     "end_date": ("end_date", "to_date", "end"),
     "span": ("span", "period", "window"),
+    "limit": ("limit", "page_size", "count"),
 }
 
 
