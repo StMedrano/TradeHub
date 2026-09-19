@@ -726,13 +726,18 @@ async def robinhood_pnl_diagnostics():
             continue
 
         schema = tool.get("input_schema") or {}
-        context = {
-            "account_number": account_number,
-            "start_date": today,
-            "end_date": today,
-            "span": "day",
-            "limit": 500,
-        }
+        if tool_name == "get_realized_pnl":
+            context = {
+                "account_number": account_number,
+                "start_date": today,
+                "end_date": today,
+            }
+        else:
+            context = {
+                "account_number": account_number,
+                "span": "week",
+                "limit": 500,
+            }
 
         try:
             args = build_arguments(schema, context)
@@ -776,7 +781,6 @@ async def robinhood_pnl_diagnostics():
                 scope_fields = {
                     "start_date", "from_date", "start", "since", "after", "date",
                     "end_date", "to_date", "end", "until", "before",
-                    "span", "period", "window",
                 }
                 scoped_to_day = any(key in args for key in scope_fields)
                 parsed, authoritative = _parse_trade_history_daily_pnl(
