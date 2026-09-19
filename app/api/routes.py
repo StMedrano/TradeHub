@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import ApprovalAction, CandidatePromotionRequest, PauseAck, RiskCheckRequest
+from app.api.schemas import ApprovalAction, CandidatePromotionRequest, PauseAck, RiskCheckRequest, SimulationCloseRequest
 from app.config import RiskCapitalMode, settings
 from app.db import SessionLocal
 from app.domain.models import AccountRiskSnapshot, RiskPolicy, StrategyType, TradeIntent
-from app.persistence.models import AuditEvent, TradeProposal, TradeProposalDetail, UnderlyingPause
+from app.persistence.models import AuditEvent, SimulationPosition, TradeProposal, TradeProposalDetail, UnderlyingPause
 from app.risk.manager import RiskManager
 from app.risk.state import portfolio_risk_state_service, simulation_risk_state_service
 from app.robinhood.client import RobinhoodTradingMCP
@@ -107,6 +107,14 @@ def _strategy_account_snapshot(
 
 def _risk_mode_label() -> str:
     return settings.risk_capital_mode.value
+
+
+def _require_simulation_mode() -> None:
+    if not _using_simulation():
+        raise HTTPException(
+            409,
+            "Simulation lifecycle endpoints require RISK_CAPITAL_MODE=simulation.",
+        )
 
 
 def _account_csp_capacity(
