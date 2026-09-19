@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -67,13 +68,13 @@ class SimulationPosition(Base):
     strategy: Mapped[str] = mapped_column(String(32))
     option_id: Mapped[str] = mapped_column(String(128), index=True)
     contracts: Mapped[int] = mapped_column(Integer)
-    strike_price: Mapped[float] = mapped_column(Numeric(18, 4))
+    strike_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
     expiration_date: Mapped[str] = mapped_column(String(16))
-    entry_credit: Mapped[float] = mapped_column(Numeric(18, 4))
-    known_max_loss: Mapped[float] = mapped_column(Numeric(18, 4))
+    entry_credit: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    known_max_loss: Mapped[Decimal] = mapped_column(Numeric(18, 4))
     status: Mapped[str] = mapped_column(String(32), default="open", index=True)
-    exit_debit: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
-    realized_pnl: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    exit_debit: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
