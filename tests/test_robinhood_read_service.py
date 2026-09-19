@@ -1,5 +1,7 @@
 from app.robinhood.read_service import (
     RobinhoodReadService,
+    _load_persisted_account_number,
+    _persist_account_number,
     _parse_realized_pnl,
     _parse_trade_history_daily_pnl,
 )
@@ -163,4 +165,24 @@ def test_labeled_plain_text_parentheses_are_negative():
     payload = "Total Realized P&L: ($8.25)"
     value, authoritative = _parse_realized_pnl(payload)
     assert value == -8.25
+    assert authoritative is True
+
+
+
+def test_persisted_agentic_account_round_trip(tmp_path, monkeypatch):
+    from app.robinhood import read_service as module
+
+    path = tmp_path / "robinhood_account.json"
+    monkeypatch.setattr(module.settings, "robinhood_account_store", str(path))
+
+    _persist_account_number("AGENTIC123")
+
+    assert _load_persisted_account_number() == "AGENTIC123"
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+
+def test_markdown_table_total_returns_is_authoritative():
+    payload = "| Metric | Value |\n|---|---:|\n| Total Returns | ($5.50) |"
+    value, authoritative = _parse_realized_pnl(payload)
+    assert value == -5.5
     assert authoritative is True
