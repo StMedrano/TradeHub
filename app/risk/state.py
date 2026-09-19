@@ -43,7 +43,8 @@ class PortfolioRiskStateService:
 
         active_proposals = db.scalars(
             select(TradeProposal).where(
-                TradeProposal.status.in_(ACTIVE_PROPOSAL_STATUSES)
+                TradeProposal.status.in_(ACTIVE_PROPOSAL_STATUSES),
+                ~TradeProposal.id.like("sim-%"),
             )
         ).all()
 
@@ -97,3 +98,60 @@ class PortfolioRiskStateService:
 
 
 portfolio_risk_state_service = PortfolioRiskStateService()
+
+
+
+class SimulationRiskStateService:
+    """Build an isolated virtual risk ledger for dry-run simulation."""
+
+    def build(
+        self,
+        db: Session,
+        *,
+        capital: Decimal,
+    ) -> AuthoritativeRiskState:
+        reasons: list[str] = []
+
+        if capital <= 0:
+            reasons.append("Simulation capital must be greater than zero.")
+
+        active_proposals = db.scalars(
+            select(TradeProposal).where(
+                TradeProposal.status.in_(ACTIVE_PROPOSAL_STATUSES),
+                TradeProposal.id.like("sim-%"),
+            )
+        ).all()
+
+        open_position_max_loss = sum(
+            (Decimal(str(row.known_max_loss)) for row in active_proposals),
+            Decimal("0"),
+        )
+
+        pauses = db.scalars(
+            select(UnderlyingPause).where(
+                UnderlyingPause.acknowledged.is_(False)
+            )
+        ).all()
+        paused = frozenset(row.symbol.upper() for row in pauses)
+
+        if reasons:
+            return AuthoritativeRiskState(
+                authoritative=False,
+                snapshot=None,
+                reasons=tuple(reasons),
+            )
+
+        return AuthoritativeRiskState(
+            authoritative=True,
+            snapshot=AccountRiskSnapshot(
+                equity=capital,
+                open_position_max_loss=open_position_max_loss,
+                realized_pnl_today=Decimal("0"),
+                concurrent_positions=len(active_proposals),
+                paused_underlyings=paused,
+            ),
+            reasons=(),
+        )
+
+
+simulation_risk_state_service = SimulationRiskStateService()
