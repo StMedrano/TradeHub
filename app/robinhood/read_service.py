@@ -397,13 +397,15 @@ class RobinhoodReadService:
             tool = catalog.get("get_realized_pnl")
             if tool:
                 today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+                # Robinhood accepts either a span OR a custom date range here,
+                # not both. Use the exact market date so the result can be
+                # authoritative for the daily loss breaker.
                 pnl_args = build_arguments(
                     tool.get("input_schema") or {},
                     {
                         "account_number": account_number,
                         "start_date": today,
                         "end_date": today,
-                        "span": "day",
                     },
                 )
                 realized_payload = await self.client.call("get_realized_pnl", pnl_args)
@@ -418,13 +420,15 @@ class RobinhoodReadService:
                 history_tool = catalog.get("get_pnl_trade_history")
                 if history_tool:
                     history_schema = history_tool.get("input_schema") or {}
+                    # Robinhood trade history currently supports broader
+                    # windows (week/month/etc.), not "day". Use week only as a
+                    # diagnostic/fallback source. A broad span by itself is NOT
+                    # sufficient to mark daily P&L authoritative.
                     history_args = build_arguments(
                         history_schema,
                         {
                             "account_number": account_number,
-                            "start_date": today,
-                            "end_date": today,
-                            "span": "day",
+                            "span": "week",
                             "limit": 500,
                         },
                     )
@@ -434,14 +438,12 @@ class RobinhoodReadService:
                         "start",
                         "since",
                         "after",
+                        "date",
                         "end_date",
                         "to_date",
                         "end",
                         "until",
                         "before",
-                        "span",
-                        "period",
-                        "window",
                     }
                     scoped_to_day = any(
                         key in history_args for key in date_scope_fields
