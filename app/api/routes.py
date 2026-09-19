@@ -235,14 +235,30 @@ def risk_check(body: RiskCheckRequest, db: Session = Depends(db_session)):
         has_short_call=body.has_short_call,
         has_short_put=body.has_short_put,
         is_defined_risk=body.is_defined_risk,
+        id=(f"sim-{uuid4()}" if _using_simulation() else str(uuid4())),
     )
-    account = AccountRiskSnapshot(
-        equity=body.account_equity,
-        open_position_max_loss=body.open_position_max_loss,
-        realized_pnl_today=body.realized_pnl_today,
-        concurrent_positions=body.concurrent_positions,
-        paused_underlyings=frozenset(x.upper() for x in body.paused_underlyings),
-    )
+    if _using_simulation():
+        simulated_state = simulation_risk_state_service.build(
+            db,
+            capital=Decimal(str(settings.simulation_capital)),
+        )
+        if not simulated_state.authoritative or simulated_state.snapshot is None:
+            raise HTTPException(
+                409,
+                {
+                    "message": "Simulation risk state is not available.",
+                    "reasons": list(simulated_state.reasons),
+                },
+            )
+        account = simulated_state.snapshot
+    else:
+        account = AccountRiskSnapshot(
+            equity=body.account_equity,
+            open_position_max_loss=body.open_position_max_loss,
+            realized_pnl_today=body.realized_pnl_today,
+            concurrent_positions=body.concurrent_positions,
+            paused_underlyings=frozenset(x.upper() for x in body.paused_underlyings),
+        )
     result = risk_manager.evaluate(intent, account, current_policy())
     status = "pending_approval" if result.approved else "rejected"
 
@@ -266,6 +282,7 @@ def risk_check(body: RiskCheckRequest, db: Session = Depends(db_session)):
             payload_json=json.dumps(
                 {
                     "proposal_id": intent.id,
+                    "risk_capital_mode": _risk_mode_label(),
                     "reasons": result.reasons,
                     "trade_max_loss": str(result.trade_max_loss),
                     "trade_limit": str(result.trade_limit),
@@ -284,6 +301,8 @@ def risk_check(body: RiskCheckRequest, db: Session = Depends(db_session)):
         "approved_by_risk": result.approved,
         "status": status,
         "reasons": result.reasons,
+        "risk_capital_mode": _risk_mode_label(),
+        "execution_enabled": False,
     }
 
 @router.post("/approvals/{proposal_id}/approve")
