@@ -842,7 +842,9 @@ export default function App() {
                 <Heading size="4">Sweep Progress</Heading>
                 <Text size="2" color="gray">
                   Risk capital: {marketScannerStatus?.risk_capital_mode || "—"} ·
-                  {" "}equity {marketScannerStatus?.risk_equity ? money(Number(marketScannerStatus.risk_equity)) : "—"}
+                  {" "}equity {marketScannerStatus?.risk_equity ? money(Number(marketScannerStatus.risk_equity)) : "—"} ·
+                  {" "}per-trade cap {marketScannerStatus?.per_trade_loss_limit ? money(Number(marketScannerStatus.per_trade_loss_limit)) : "—"} ·
+                  {" "}portfolio cap {marketScannerStatus?.portfolio_loss_limit ? money(Number(marketScannerStatus.portfolio_loss_limit)) : "—"}
                 </Text>
               </Box>
               <Text size="2" weight="bold">{progress}%</Text>
@@ -850,7 +852,7 @@ export default function App() {
             <Progress value={progress} color={statusTone === "red" ? "red" : statusTone === "amber" ? "amber" : "green"} />
             <Flex justify="between" mt="2" gap="3" wrap="wrap">
               <Text size="1" color="gray">
-                Run {marketScannerStatus?.run_id || "not started"}
+                Run {marketScannerStatus?.run_id || "not started"} · target {marketScannerStatus?.deep_scan_target ?? 0} symbols
               </Text>
               <Text size="1" color="gray">
                 {marketScannerStatus?.completed_at
