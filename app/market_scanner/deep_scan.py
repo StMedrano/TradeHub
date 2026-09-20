@@ -17,6 +17,7 @@ from app.market_scanner.prefilter import EquityReadProvider, RobinhoodEquityRead
 from app.market_scanner.store import MarketScannerStore
 from app.risk.manager import RiskManager
 from app.risk.state import portfolio_risk_state_service, simulation_risk_state_service
+from app.robinhood.client import RobinhoodAuthRequired
 from app.robinhood.market_data import RobinhoodMarketDataService, robinhood_market_data
 from app.robinhood.read_service import RobinhoodSnapshot, robinhood_read_service
 from app.strategy.candidates import PhaseOneCandidateEngine, phase_one_candidate_engine
@@ -133,6 +134,8 @@ class MarketDeepScanService:
         for attempt in range(2):
             try:
                 return await self.market_data.scan_symbol(symbol)
+            except RobinhoodAuthRequired:
+                raise
             except Exception as exc:
                 last_error = exc
                 if attempt == 0:
@@ -217,6 +220,8 @@ class MarketDeepScanService:
 
         try:
             scan = await self._market_scan_with_retry(symbol)
+        except RobinhoodAuthRequired:
+            raise
         except Exception as exc:
             return await self._persist_failure(run_id, symbol, exc)
 
@@ -381,7 +386,14 @@ class MarketDeepScanService:
         symbol: str,
     ) -> DeepScanSymbolResult:
         context = await self.risk_context_provider.get()
-        return await self._scan_with_context(run_id, symbol, context)
+        try:
+            return await self._scan_with_context(run_id, symbol, context)
+        except RobinhoodAuthRequired:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return await self._persist_failure(run_id, symbol, exc)
 
     async def scan_many(
         self,
@@ -393,7 +405,14 @@ class MarketDeepScanService:
 
         async def one(symbol: str):
             async with semaphore:
-                return await self._scan_with_context(run_id, symbol, context)
+                try:
+                    return await self._scan_with_context(run_id, symbol, context)
+                except RobinhoodAuthRequired:
+                    raise
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    return await self._persist_failure(run_id, symbol, exc)
 
         results = await asyncio.gather(*(one(symbol) for symbol in symbols))
         return {result.symbol: result for result in results}
