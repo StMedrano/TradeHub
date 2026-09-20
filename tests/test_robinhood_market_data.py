@@ -1,3 +1,6 @@
+import pytest
+
+from app.robinhood.client import RobinhoodAuthRequired
 from app.robinhood.market_data import (
     RobinhoodMarketDataService,
     _centered_strikes,
@@ -156,3 +159,29 @@ def test_infer_strike_step_and_center_search_near_spot():
     assert min(strikes) < 700
     assert max(strikes) > 825
     assert min(abs(value - 763.42) for value in strikes) <= 5.0
+
+
+
+class AuthFailingMarketClient:
+    async def tool_catalog(self):
+        return {
+            "get_option_chains": {
+                "name": "get_option_chains",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"symbol": {"type": "string"}},
+                    "required": ["symbol"],
+                },
+            }
+        }
+
+    async def call(self, tool_name, arguments):
+        raise RobinhoodAuthRequired("authentication required")
+
+
+@pytest.mark.asyncio
+async def test_market_data_auth_failure_propagates():
+    service = RobinhoodMarketDataService(AuthFailingMarketClient())
+
+    with pytest.raises(RobinhoodAuthRequired):
+        await service.scan_symbol("SPY")
