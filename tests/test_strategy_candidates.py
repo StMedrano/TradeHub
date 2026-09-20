@@ -150,3 +150,59 @@ def test_diagnostics_explain_covered_call_share_requirement():
 
     assert diagnostics[0].passed is False
     assert any("100 owned shares" in reason for reason in diagnostics[0].reasons)
+
+
+
+def test_approved_market_scanner_strategy_boundaries(monkeypatch):
+    from app.config import settings
+
+    snapshot = RobinhoodSnapshot(
+        connection_state="connected",
+        buying_power=50000,
+        equity_positions=[],
+    )
+
+    monkeypatch.setattr(settings, "strategy_min_dte", 21)
+    monkeypatch.setattr(settings, "strategy_max_dte", 45)
+    monkeypatch.setattr(settings, "strategy_short_delta_min", 0.15)
+    monkeypatch.setattr(settings, "strategy_short_delta_max", 0.30)
+    monkeypatch.setattr(settings, "strategy_min_open_interest", 500)
+    monkeypatch.setattr(settings, "strategy_min_volume", 50)
+    monkeypatch.setattr(settings, "liquidity_max_spread_pct", 0.10)
+
+    def row(*, dte=30, delta=0.20, oi=500, volume=50, spread=10.0):
+        expiry = (date.today() + timedelta(days=dte)).isoformat()
+        item = contract(
+            option_type="put",
+            delta=delta,
+            open_interest=oi,
+            volume=volume,
+            spread_pct=spread,
+        )
+        item["expiration_date"] = expiry
+        return item
+
+    engine = PhaseOneCandidateEngine()
+
+    accepted = engine.generate(
+        scan(
+            row(dte=21, delta=0.15, oi=500, volume=50, spread=10.0),
+            row(dte=45, delta=0.30, oi=500, volume=50, spread=10.0),
+        ),
+        snapshot,
+    )
+    assert len(accepted) == 2
+
+    rejected = engine.generate(
+        scan(
+            row(dte=20),
+            row(dte=46),
+            row(delta=0.14),
+            row(delta=0.31),
+            row(oi=499),
+            row(volume=49),
+            row(spread=10.01),
+        ),
+        snapshot,
+    )
+    assert rejected == []
