@@ -286,7 +286,7 @@ class MarketScannerStore:
             select(MarketScanSymbol).where(
                 MarketScanSymbol.run_id == run_id,
                 MarketScanSymbol.equity_screen_status == "passed",
-                MarketScanSymbol.option_scan_status != "complete",
+                MarketScanSymbol.option_scan_status.in_(("pending", "running")),
             )
         ).all()
         rows = sorted(
