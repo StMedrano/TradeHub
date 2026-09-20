@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 from typing import Protocol
 
@@ -60,41 +61,76 @@ class MarketUniverseCoordinator:
                 symbol in watchlist,
             )
 
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise KeyError(run_id)
+        run.symbols_discovered = len(unique)
+        run.symbols_prefiltered = 0
+        self.store.db.commit()
+
         capacity = (
             Decimal(str(run.risk_equity))
             * Decimal(str(settings.max_trade_loss_pct))
         )
+        base_error_count = run.error_count
         passed = 0
         prefilter_errors = 0
-        for symbol in sorted(unique):
-            watchlist_priority = symbol in watchlist
-            try:
-                result = await self.prefilter.screen(
-                    symbol,
-                    watchlist_priority,
-                    capacity,
-                )
-            except RobinhoodAuthRequired:
-                raise
-            except Exception as exc:
-                prefilter_errors += 1
-                result = EquityScreenResult(
-                    symbol=symbol,
-                    passed=False,
-                    reasons=(f"Equity prefilter read failed: {exc}",),
-                    priority_score=0.0,
-                )
+        semaphore = asyncio.Semaphore(
+            settings.market_scanner_prefilter_concurrency
+        )
 
-            self.store.mark_equity_screen(run_id, symbol, result)
-            if result.passed:
-                passed += 1
+        async def screen_symbol(symbol: str):
+            async with semaphore:
+                watchlist_priority = symbol in watchlist
+                try:
+                    result = await self.prefilter.screen(
+                        symbol,
+                        watchlist_priority,
+                        capacity,
+                    )
+                    return symbol, result, None
+                except RobinhoodAuthRequired as exc:
+                    return symbol, None, exc
+                except Exception as exc:
+                    result = EquityScreenResult(
+                        symbol=symbol,
+                        passed=False,
+                        reasons=(f"Equity prefilter read failed: {exc}",),
+                        priority_score=0.0,
+                    )
+                    return symbol, result, exc
 
-        run = self.store.get_run(run_id)
-        if run is not None:
-            run.symbols_discovered = len(unique)
-            run.symbols_prefiltered = passed
-            run.error_count += prefilter_errors
-            self.store.db.commit()
+        tasks = [
+            asyncio.create_task(screen_symbol(symbol))
+            for symbol in sorted(unique)
+        ]
+
+        try:
+            for completed in asyncio.as_completed(tasks):
+                symbol, result, error = await completed
+                if isinstance(error, RobinhoodAuthRequired):
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise error
+
+                if error is not None:
+                    prefilter_errors += 1
+                assert result is not None
+                self.store.mark_equity_screen(run_id, symbol, result)
+                if result.passed:
+                    passed += 1
+
+                progress = self.store.get_run(run_id)
+                if progress is not None:
+                    progress.symbols_prefiltered = passed
+                    progress.error_count = base_error_count + prefilter_errors
+                    self.store.db.commit()
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
 
         return len(unique)
 
