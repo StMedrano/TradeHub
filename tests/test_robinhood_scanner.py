@@ -30,6 +30,22 @@ class FakeScannerClient:
             },
             "required": ["name"],
         }
+        self.catalog["update_scan_filters"]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "scan_id": {"type": "string"},
+                "filters": {"type": "array"},
+            },
+            "required": ["scan_id", "filters"],
+        }
+        self.catalog["update_scan_config"]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "scan_id": {"type": "string"},
+                "sort": {"type": "object"},
+            },
+            "required": ["scan_id", "sort"],
+        }
         self.responses = {
             "get_scans": {"data": []},
             "get_scanner_filter_specs": {
@@ -80,6 +96,20 @@ async def test_ensure_tradehub_scan_reuses_named_scan():
 
     assert scan_id == "scan-1"
     assert all(name != "create_scan" for name, _ in client.calls)
+    assert (
+        "update_scan_filters",
+        {
+            "scan_id": "scan-1",
+            "filters": [{"field": "price", "operator": "between", "value": [5, 50]}],
+        },
+    ) in client.calls
+    assert (
+        "update_scan_config",
+        {
+            "scan_id": "scan-1",
+            "sort": {"field": "volume", "direction": "desc"},
+        },
+    ) in client.calls
 
 
 @pytest.mark.asyncio
@@ -117,3 +147,21 @@ async def test_run_scan_normalizes_and_deduplicates_symbols():
 
     assert [row["symbol"] for row in rows] == ["AAPL", "MSFT"]
     assert client.calls[-1] == ("run_scan", {"scan_id": "scan-1"})
+
+
+
+@pytest.mark.asyncio
+async def test_existing_scan_fails_closed_when_filters_cannot_be_reconciled():
+    client = FakeScannerClient()
+    client.catalog.pop("update_scan_filters")
+    client.responses["get_scans"] = {
+        "data": [{"id": "scan-1", "name": "TradeHub:market:price-5-50"}]
+    }
+    service = RobinhoodScannerService(client)
+
+    with pytest.raises(RuntimeError, match="update_scan_filters"):
+        await service.ensure_tradehub_scan(
+            "TradeHub:market:price-5-50",
+            filters=[{"field": "price", "operator": "between", "value": [5, 50]}],
+            sort={"field": "volume", "direction": "desc"},
+        )
