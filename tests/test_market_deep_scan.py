@@ -14,7 +14,11 @@ from app.market_scanner.deep_scan import (
 )
 from app.market_scanner.store import MarketScannerStore
 from app.market_scanner.types import EquityScreenResult
-from app.robinhood.market_data import OptionScanResult
+from app.robinhood.market_data import (
+    OptionScanResult,
+    READ_ONLY_OPTION_TOOLS,
+    RobinhoodMarketDataService,
+)
 from app.robinhood.read_service import RobinhoodSnapshot
 
 
@@ -244,3 +248,145 @@ async def test_scan_many_never_exceeds_configured_concurrency(monkeypatch):
     await service.scan_many(run.id, symbols)
 
     assert tracker.max_seen <= 2
+
+
+
+class StrictReadOnlyMCP:
+    forbidden = {
+        "review_option_order",
+        "place_option_order",
+        "cancel_option_order",
+    }
+
+    def __init__(self):
+        self.called_tool_names = []
+        expiry = (date.today() + timedelta(days=30)).isoformat()
+        self.expiry = expiry
+        self.catalog = {
+            "get_option_chains": {
+                "name": "get_option_chains",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"symbol": {"type": "string"}},
+                    "required": ["symbol"],
+                },
+            },
+            "get_equity_quotes": {
+                "name": "get_equity_quotes",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"symbols": {"type": "array"}},
+                    "required": ["symbols"],
+                },
+            },
+            "get_option_instruments": {
+                "name": "get_option_instruments",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "state": {"type": "string"},
+                        "expiration_dates": {"type": "array"},
+                    },
+                    "required": ["symbol"],
+                },
+            },
+            "get_option_quotes": {
+                "name": "get_option_quotes",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"option_ids": {"type": "array"}},
+                    "required": ["option_ids"],
+                },
+            },
+            "review_option_order": {
+                "name": "review_option_order",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+            "place_option_order": {
+                "name": "place_option_order",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+            "cancel_option_order": {
+                "name": "cancel_option_order",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        }
+
+    async def tool_catalog(self):
+        return self.catalog
+
+    async def call(self, tool_name, arguments):
+        self.called_tool_names.append(tool_name)
+        if tool_name in self.forbidden:
+            raise AssertionError(f"Market scanner attempted forbidden order tool {tool_name}.")
+        if tool_name not in READ_ONLY_OPTION_TOOLS:
+            raise AssertionError(f"Market scanner attempted unapproved tool {tool_name}.")
+
+        if tool_name == "get_option_chains":
+            return {
+                "data": [
+                    {
+                        "id": "chain-safe",
+                        "symbol": "SAFE",
+                        "expiration_dates": [self.expiry],
+                    }
+                ]
+            }
+        if tool_name == "get_equity_quotes":
+            return {
+                "data": [
+                    {
+                        "symbol": "SAFE",
+                        "last_trade_price": "110",
+                    }
+                ]
+            }
+        if tool_name == "get_option_instruments":
+            return {
+                "data": [
+                    {
+                        "id": "safe-opt",
+                        "chain_symbol": "SAFE",
+                        "expiration_date": self.expiry,
+                        "strike_price": "100",
+                        "type": "put",
+                        "trade_value_multiplier": "100",
+                    }
+                ]
+            }
+        if tool_name == "get_option_quotes":
+            return {
+                "data": [
+                    {
+                        "option_id": "safe-opt",
+                        "bid_price": "2.00",
+                        "ask_price": "2.10",
+                        "mark_price": "2.05",
+                        "open_interest": 1200,
+                        "volume": 250,
+                        "implied_volatility": "0.30",
+                        "delta": "-0.20",
+                        "theta": "-0.03",
+                    }
+                ]
+            }
+        raise AssertionError(f"Unhandled test tool {tool_name}.")
+
+
+@pytest.mark.asyncio
+async def test_market_scan_never_calls_robinhood_order_tools():
+    store, run = make_store(["SAFE"])
+    client = StrictReadOnlyMCP()
+    service = MarketDeepScanService(
+        market_data=RobinhoodMarketDataService(client),
+        store=store,
+        risk_context_provider=FakeRiskContextProvider(),
+    )
+
+    result = await service.scan_symbol(run.id, "SAFE")
+
+    assert result.status == "complete"
+    assert result.match_count == 1
+    assert client.forbidden.isdisjoint(set(client.called_tool_names))
+    assert set(client.called_tool_names).issubset(READ_ONLY_OPTION_TOOLS)
