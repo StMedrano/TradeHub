@@ -809,7 +809,7 @@ export default function App() {
             ) : null}
           </Card>
 
-          <Grid columns={{ initial: "2", md: "3", xl: "6" }} gap="3">
+          <Grid className="scanner-metric-grid" columns={{ initial: "2", md: "3", xl: "6" }} gap="3">
             <Box className="position-stat">
               <Text size="1" color="gray">Discovered</Text>
               <Heading size="5">{marketScannerStatus?.symbols_discovered ?? 0}</Heading>
@@ -836,7 +836,7 @@ export default function App() {
             </Box>
           </Grid>
 
-          <Card className="large-card">
+          <Card className="large-card scanner-progress-card">
             <Flex justify="between" align="center" mb="2">
               <Box>
                 <Heading size="4">Sweep Progress</Heading>
