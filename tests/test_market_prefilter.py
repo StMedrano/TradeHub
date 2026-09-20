@@ -197,6 +197,7 @@ async def test_high_spot_price_lowers_priority_without_rejecting():
 class EtfReadClient:
     def __init__(self):
         self.calls = []
+        self.catalog_calls = 0
         self.catalog = {
             "get_equity_quotes": {
                 "name": "get_equity_quotes",
@@ -225,6 +226,7 @@ class EtfReadClient:
         }
 
     async def tool_catalog(self):
+        self.catalog_calls += 1
         return self.catalog
 
     async def call(self, tool_name, arguments):
@@ -253,3 +255,15 @@ async def test_robinhood_provider_does_not_require_earnings_tool_for_etf():
     assert snapshot.is_etf is True
     assert snapshot.next_earnings_date is None
     assert "get_earnings_calendar" not in client.calls
+
+
+
+@pytest.mark.asyncio
+async def test_robinhood_equity_provider_reuses_tool_catalog():
+    client = EtfReadClient()
+    provider = RobinhoodEquityReadProvider(client)
+
+    await provider.snapshot("ETF")
+    await provider.snapshot("ETF")
+
+    assert client.catalog_calls == 1

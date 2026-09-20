@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     market_scanner_enabled: bool = False
     market_scanner_max_deep_symbols: int = Field(default=100, ge=1, le=1000)
     market_scanner_option_concurrency: int = Field(default=2, ge=1, le=10)
+    market_scanner_prefilter_concurrency: int = Field(default=4, ge=1, le=20)
     market_scanner_min_price: float = Field(default=5.0, ge=0)
     market_scanner_min_avg_volume: int = Field(default=1_000_000, ge=0)
     market_scanner_min_market_cap: int = Field(default=1_000_000_000, ge=0)

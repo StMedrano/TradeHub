@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.config import settings
 from app.market_scanner.types import DiscoveredSymbol
 from app.robinhood.client import RobinhoodTradingMCP
 from app.robinhood.schema_args import build_arguments
@@ -90,9 +91,12 @@ class RobinhoodScannerService:
 
     def __init__(self, client: RobinhoodTradingMCP | None = None):
         self.client = client or RobinhoodTradingMCP()
+        self._catalog_cache: dict[str, dict[str, Any]] | None = None
 
     async def _catalog(self) -> dict[str, dict[str, Any]]:
-        return await self.client.tool_catalog()
+        if self._catalog_cache is None:
+            self._catalog_cache = await self.client.tool_catalog()
+        return self._catalog_cache
 
     @staticmethod
     def _require_tool(
@@ -220,6 +224,22 @@ class RobinhoodScannerService:
                         "value": value if maximum is not None else minimum,
                     }
                 ]
+                if "average_volume" in support.available:
+                    filters.append(
+                        {
+                            "field": "average_volume",
+                            "operator": "gte",
+                            "value": settings.market_scanner_min_avg_volume,
+                        }
+                    )
+                if "market_cap" in support.available:
+                    filters.append(
+                        {
+                            "field": "market_cap",
+                            "operator": "gte",
+                            "value": settings.market_scanner_min_market_cap,
+                        }
+                    )
                 sort_field = (
                     "average_volume"
                     if "average_volume" in support.available
@@ -243,9 +263,26 @@ class RobinhoodScannerService:
                         ),
                     )
         else:
+            broad_filters: list[dict[str, Any]] = []
+            if "average_volume" in support.available:
+                broad_filters.append(
+                    {
+                        "field": "average_volume",
+                        "operator": "gte",
+                        "value": settings.market_scanner_min_avg_volume,
+                    }
+                )
+            if "market_cap" in support.available:
+                broad_filters.append(
+                    {
+                        "field": "market_cap",
+                        "operator": "gte",
+                        "value": settings.market_scanner_min_market_cap,
+                    }
+                )
             scan_id = await self.ensure_tradehub_scan(
                 "TradeHub:market:broad",
-                filters=[],
+                filters=broad_filters,
                 sort=None,
             )
             for row in await self.run_scan(scan_id):

@@ -84,6 +84,12 @@ def _first_payload_value(payload: Any, names: tuple[str, ...]) -> Any:
 class RobinhoodEquityReadProvider:
     def __init__(self, client: RobinhoodTradingMCP | None = None):
         self.client = client or RobinhoodTradingMCP()
+        self._catalog_cache: dict[str, dict[str, Any]] | None = None
+
+    async def _catalog(self) -> dict[str, dict[str, Any]]:
+        if self._catalog_cache is None:
+            self._catalog_cache = await self.client.tool_catalog()
+        return self._catalog_cache
 
     async def _call(
         self,
@@ -104,7 +110,7 @@ class RobinhoodEquityReadProvider:
 
     async def snapshot(self, symbol: str) -> EquityReadSnapshot:
         symbol = symbol.strip().upper()
-        catalog = await self.client.tool_catalog()
+        catalog = await self._catalog()
 
         quote = await self._call("get_equity_quotes", symbol, catalog)
         fundamentals = await self._call("get_equity_fundamentals", symbol, catalog)
