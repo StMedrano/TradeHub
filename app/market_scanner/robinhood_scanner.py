@@ -91,9 +91,12 @@ class RobinhoodScannerService:
 
     def __init__(self, client: RobinhoodTradingMCP | None = None):
         self.client = client or RobinhoodTradingMCP()
+        self._catalog_cache: dict[str, dict[str, Any]] | None = None
 
     async def _catalog(self) -> dict[str, dict[str, Any]]:
-        return await self.client.tool_catalog()
+        if self._catalog_cache is None:
+            self._catalog_cache = await self.client.tool_catalog()
+        return self._catalog_cache
 
     @staticmethod
     def _require_tool(
