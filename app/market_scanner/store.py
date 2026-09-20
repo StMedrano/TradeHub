@@ -110,11 +110,26 @@ class MarketScannerStore:
             )
         )
         if row is None:
+            previous = self.db.scalar(
+                select(MarketScanSymbol)
+                .where(
+                    MarketScanSymbol.symbol == normalized,
+                    MarketScanSymbol.run_id != run_id,
+                    MarketScanSymbol.last_deep_scan_at.is_not(None),
+                )
+                .order_by(MarketScanSymbol.last_deep_scan_at.desc())
+            )
             row = MarketScanSymbol(
                 run_id=run_id,
                 symbol=normalized,
                 source_slice=source_slice,
                 watchlist_priority=watchlist_priority,
+                last_deep_scan_at=(
+                    previous.last_deep_scan_at if previous is not None else None
+                ),
+                consecutive_error_count=(
+                    previous.consecutive_error_count if previous is not None else 0
+                ),
             )
             self.db.add(row)
         else:
