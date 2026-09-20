@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 
 import pytest
@@ -256,7 +257,6 @@ class BlockingDeepScan:
 
 @pytest.mark.asyncio
 async def test_worker_stop_cancels_active_sweep_and_restart_requeues(monkeypatch):
-    import asyncio
     from app.config import settings
 
     monkeypatch.setattr(settings, "market_scanner_enabled", True)
