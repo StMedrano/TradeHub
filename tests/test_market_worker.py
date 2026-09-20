@@ -210,28 +210,41 @@ async def test_resume_skips_discovery_when_persisted_universe_exists():
 
 
 @pytest.mark.asyncio
-async def test_worker_processes_all_deep_scan_batches_before_completing(monkeypatch):
+async def test_cycle_cap_rotates_never_scanned_symbols_across_runs(monkeypatch):
     from app.config import settings
 
     monkeypatch.setattr(settings, "market_scanner_max_deep_symbols", 2)
     factory, _ = session_factory()
-    symbols = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    symbols = ["AAA", "BBB", "CCC"]
     worker = worker_with_fakes(factory, symbols=symbols)
-    run = worker.create_or_queue_run(
+
+    first = worker.create_or_queue_run(
         risk_capital_mode="simulation",
         risk_equity=Decimal("750000"),
         config_snapshot={},
     )
-
-    await worker.run_once(run.id)
+    await worker.run_once(first.id)
 
     db = factory()
-    store = MarketScannerStore(db)
-    assert store.get_run(run.id).status == "complete"
-    assert all(
-        store.get_symbol(run.id, symbol).option_scan_status == "complete"
+    first_store = MarketScannerStore(db)
+    first_statuses = {
+        symbol: first_store.get_symbol(first.id, symbol).option_scan_status
         for symbol in symbols
+    }
+    assert sum(status == "complete" for status in first_statuses.values()) == 2
+    assert first_statuses["CCC"] == "pending"
+    db.close()
+
+    second = worker.create_or_queue_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={},
     )
+    await worker.run_once(second.id)
+
+    db = factory()
+    second_store = MarketScannerStore(db)
+    assert second_store.get_symbol(second.id, "CCC").option_scan_status == "complete"
     db.close()
 
 
