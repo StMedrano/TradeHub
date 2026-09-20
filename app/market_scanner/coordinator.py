@@ -8,7 +8,8 @@ from app.market_scanner.robinhood_scanner import (
     robinhood_scanner_service,
 )
 from app.market_scanner.store import MarketScannerStore
-from app.market_scanner.types import DiscoveredSymbol
+from app.market_scanner.types import DiscoveredSymbol, EquityScreenResult
+from app.robinhood.client import RobinhoodAuthRequired
 
 
 class SymbolDiscoveryProvider(Protocol):
@@ -64,13 +65,26 @@ class MarketUniverseCoordinator:
             * Decimal(str(settings.max_trade_loss_pct))
         )
         passed = 0
+        prefilter_errors = 0
         for symbol in sorted(unique):
             watchlist_priority = symbol in watchlist
-            result = await self.prefilter.screen(
-                symbol,
-                watchlist_priority,
-                capacity,
-            )
+            try:
+                result = await self.prefilter.screen(
+                    symbol,
+                    watchlist_priority,
+                    capacity,
+                )
+            except RobinhoodAuthRequired:
+                raise
+            except Exception as exc:
+                prefilter_errors += 1
+                result = EquityScreenResult(
+                    symbol=symbol,
+                    passed=False,
+                    reasons=(f"Equity prefilter read failed: {exc}",),
+                    priority_score=0.0,
+                )
+
             self.store.mark_equity_screen(run_id, symbol, result)
             if result.passed:
                 passed += 1
@@ -79,6 +93,7 @@ class MarketUniverseCoordinator:
         if run is not None:
             run.symbols_discovered = len(unique)
             run.symbols_prefiltered = passed
+            run.error_count += prefilter_errors
             self.store.db.commit()
 
         return len(unique)
