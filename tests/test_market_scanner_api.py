@@ -133,6 +133,9 @@ def test_status_returns_latest_run_counts():
     assert body["run_id"] == run.id
     assert body["symbols_discovered"] == 100
     assert body["symbols_prefiltered"] == 20
+    assert body["deep_scan_target"] == 20
+    assert Decimal(body["per_trade_loss_limit"]) == Decimal("37500")
+    assert Decimal(body["portfolio_loss_limit"]) == Decimal("150000")
     assert body["execution_enabled"] is False
 
 
