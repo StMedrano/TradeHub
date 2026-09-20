@@ -18,11 +18,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install
-
-      - name: Capture frontend lockfile
-        working-directory: frontend
-        run: python3 -c 'import base64,pathlib; data=pathlib.Path("package-lock.json").read_bytes(); print("TRADEHUB_LOCK_BEGIN"); print(base64.b64encode(data).decode()); print("TRADEHUB_LOCK_END")'
+        run: npm ci
 
       - name: Test frontend
         working-directory: frontend
