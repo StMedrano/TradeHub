@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  opportunityAgeLabel,
+  scannerIsActive,
+  scannerProgress,
+  scannerStatusTone
+} from "./marketScanner";
+import {
   Theme,
   Box,
   Flex,
@@ -43,6 +49,7 @@ import {
 
 const NAV = [
   ["overview", "Overview", DashboardIcon],
+  ["marketScanner", "Market Scanner", BarChartIcon],
   ["opportunities", "Trade Opportunities", LightningBoltIcon],
   ["positions", "Positions", BackpackIcon],
   ["approvals", "Approvals", CheckCircledIcon],
@@ -54,6 +61,7 @@ const NAV = [
 
 const SECTION_COPY = {
   overview: ["Overview", "Your portfolio at a glance"],
+  marketScanner: ["Market Scanner", "Whole-market Robinhood discovery with mechanical CSP and TradeHub risk filters"],
   opportunities: ["Trade Opportunities", "Candidates produced by the strategy engine"],
   positions: ["Positions", "Open Robinhood Agentic option and equity exposure"],
   approvals: ["Approvals", "Review risk-approved trade intents before execution"],
@@ -344,7 +352,7 @@ function Sidebar({ section, setSection, approvalCount }) {
       </Flex>
 
       <nav className="nav-list">
-        {NAV.slice(0, 7).map(([key, label, Icon]) => (
+        {NAV.slice(0, 8).map(([key, label, Icon]) => (
           <button
             key={key}
             className={"nav-item " + (section === key ? "active" : "")}
@@ -428,6 +436,10 @@ export default function App() {
   const [pauses, setPauses] = useState([]);
   const [activity, setActivity] = useState([]);
   const [positions, setPositions] = useState({ equities: [], options: [] });
+  const [marketScannerStatus, setMarketScannerStatus] = useState(null);
+  const [marketOpportunities, setMarketOpportunities] = useState([]);
+  const [marketNearMisses, setMarketNearMisses] = useState([]);
+  const [marketScanStarting, setMarketScanStarting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scanSymbol, setScanSymbol] = useState("SPY");
   const [scanResult, setScanResult] = useState(null);
@@ -452,16 +464,26 @@ export default function App() {
         fetch("/api/approvals"),
         fetch("/api/pauses"),
         fetch("/api/activity"),
-        fetch("/api/positions")
+        fetch("/api/positions"),
+        fetch("/api/market-scanner/status"),
+        fetch("/api/market-scanner/opportunities"),
+        fetch("/api/market-scanner/near-misses")
       ]);
 
       if (responses.some((r) => !r.ok)) {
         throw new Error("TradeHub API returned an error.");
       }
 
-      const [nextSummary, nextApprovals, nextPauses, nextActivity, nextPositions] = await Promise.all(
-        responses.map((r) => r.json())
-      );
+      const [
+        nextSummary,
+        nextApprovals,
+        nextPauses,
+        nextActivity,
+        nextPositions,
+        nextMarketScannerStatus,
+        nextMarketOpportunities,
+        nextMarketNearMisses
+      ] = await Promise.all(responses.map((r) => r.json()));
 
       if (
         nextApprovals.length > previousApprovals.current &&
@@ -480,6 +502,9 @@ export default function App() {
       setPauses(nextPauses);
       setActivity(nextActivity);
       setPositions(nextPositions);
+      setMarketScannerStatus(nextMarketScannerStatus);
+      setMarketOpportunities(nextMarketOpportunities.items || []);
+      setMarketNearMisses(nextMarketNearMisses.items || []);
       setError("");
     } catch (err) {
       setError(err.message || "Unable to load TradeHub.");
@@ -493,6 +518,12 @@ export default function App() {
     const timer = window.setInterval(() => refresh(true), 10000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!scannerIsActive(marketScannerStatus?.status)) return undefined;
+    const timer = window.setInterval(() => refresh(true), 5000);
+    return () => window.clearInterval(timer);
+  }, [marketScannerStatus?.status, refresh]);
 
   const title = SECTION_COPY[section][0];
   const subtitle = SECTION_COPY[section][1];
@@ -547,15 +578,16 @@ export default function App() {
     }
   }
 
-  async function promoteCandidate(candidate) {
-    if (!candidate?.option_id || !candidateResult?.symbol) return;
+  async function promoteCandidate(candidate, symbolOverride = null) {
+    const symbol = symbolOverride || candidateResult?.symbol;
+    if (!candidate?.option_id || !symbol) return;
     setPromotingId(candidate.option_id);
     try {
       const response = await fetch("/api/opportunities/promote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          symbol: candidateResult.symbol,
+          symbol,
           option_id: candidate.option_id
         })
       });
@@ -571,7 +603,9 @@ export default function App() {
       }
 
       await refresh(true);
-      await scanOptions();
+      if (!symbolOverride) {
+        await scanOptions();
+      }
       setSection("approvals");
       setError("");
     } catch (err) {
@@ -610,6 +644,29 @@ export default function App() {
       setError(err.message || "Option scan failed.");
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function runMarketScan() {
+    setMarketScanStarting(true);
+    try {
+      const response = await fetch("/api/market-scanner/run", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        const detail = body.detail;
+        if (typeof detail === "object" && detail?.reasons) {
+          throw new Error(detail.reasons.join(" · "));
+        }
+        throw new Error(
+          typeof detail === "string" ? detail : "Whole-market scan could not be queued."
+        );
+      }
+      await refresh(true);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Whole-market scan could not be queued.");
+    } finally {
+      setMarketScanStarting(false);
     }
   }
 
