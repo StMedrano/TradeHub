@@ -109,7 +109,21 @@ class RobinhoodEquityReadProvider:
         quote = await self._call("get_equity_quotes", symbol, catalog)
         fundamentals = await self._call("get_equity_fundamentals", symbol, catalog)
         tradability = await self._call("get_equity_tradability", symbol, catalog)
-        earnings = await self._call("get_earnings_calendar", symbol, catalog)
+
+        security_type = str(
+            _first_payload_value(
+                fundamentals,
+                ("security_type", "instrument_type", "asset_type", "type"),
+            )
+            or ""
+        ).lower()
+        is_etf = "etf" in security_type or "exchange traded fund" in security_type
+
+        earnings = (
+            None
+            if is_etf
+            else await self._call("get_earnings_calendar", symbol, catalog)
+        )
 
         price = _decimal(
             _first_payload_value(
@@ -140,15 +154,6 @@ class RobinhoodEquityReadProvider:
                 ("market_cap", "market_capitalization", "marketCapitalization"),
             )
         )
-
-        security_type = str(
-            _first_payload_value(
-                fundamentals,
-                ("security_type", "instrument_type", "asset_type", "type"),
-            )
-            or ""
-        ).lower()
-        is_etf = "etf" in security_type or "exchange traded fund" in security_type
 
         raw_tradable = _first_payload_value(
             tradability,
