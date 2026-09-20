@@ -142,14 +142,26 @@ class MarketScanWorker:
                 else {}
             )
 
-            has_failure = any(
+            deep_failures = any(
                 result.status == "failed"
                 for result in results.values()
             )
-            store.set_run_status(
-                run_id,
-                "partial" if has_failure else "complete",
+            deep_successes = any(
+                result.status == "complete"
+                for result in results.values()
             )
+            run_state = store.get_run(run_id)
+            recorded_errors = bool(
+                run_state is not None and run_state.error_count > 0
+            )
+            has_errors = deep_failures or recorded_errors
+
+            if has_errors:
+                final_status = "partial" if deep_successes else "failed"
+            else:
+                final_status = "complete"
+
+            store.set_run_status(run_id, final_status)
         except Exception:
             try:
                 store = MarketScannerStore(db)
