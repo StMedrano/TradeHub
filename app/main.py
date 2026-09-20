@@ -8,6 +8,7 @@ from app.api.routes import router
 from app.config import settings
 from app.db import init_db
 from app.robinhood.read_service import robinhood_read_service
+from app.market_scanner.worker import market_scan_worker
 
 app = FastAPI(title=settings.app_name)
 app.include_router(router)
@@ -23,10 +24,12 @@ if ASSETS_DIR.exists():
 async def startup() -> None:
     init_db()
     robinhood_read_service.start()
+    await market_scan_worker.start()
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    await market_scan_worker.stop()
     await robinhood_read_service.stop()
 
 
