@@ -12,8 +12,10 @@ from app.market_scanner.deep_scan import (
     MarketDeepScanService,
     RiskContext,
 )
+from app.market_scanner.prefilter import EquityReadSnapshot
 from app.market_scanner.store import MarketScannerStore
 from app.market_scanner.types import EquityScreenResult
+from app.robinhood.client import RobinhoodAuthRequired
 from app.robinhood.market_data import (
     OptionScanResult,
     READ_ONLY_OPTION_TOOLS,
@@ -390,3 +392,64 @@ async def test_market_scan_never_calls_robinhood_order_tools():
     assert result.match_count == 1
     assert client.forbidden.isdisjoint(set(client.called_tool_names))
     assert set(client.called_tool_names).issubset(READ_ONLY_OPTION_TOOLS)
+
+
+
+class ExplodingEquityProvider:
+    async def snapshot(self, symbol):
+        if symbol == "BAD":
+            raise RuntimeError("earnings lookup failed")
+        return EquityReadSnapshot(
+            symbol=symbol,
+            price=Decimal("100"),
+            average_volume=2_000_000,
+            market_cap=Decimal("5000000000"),
+            is_etf=False,
+            tradable=True,
+            next_earnings_date=date.today() + timedelta(days=60),
+        )
+
+
+@pytest.mark.asyncio
+async def test_post_market_data_symbol_failure_does_not_cancel_other_symbols():
+    store, run = make_store(["GOOD", "BAD"])
+    market_data = FakeMarketData(
+        {
+            symbol: scan(
+                symbol,
+                [contract(symbol, option_id=f"{symbol}-1", strike=100, bid=2)],
+            )
+            for symbol in ("GOOD", "BAD")
+        }
+    )
+    service = MarketDeepScanService(
+        market_data=market_data,
+        store=store,
+        risk_context_provider=FakeRiskContextProvider(),
+        equity_provider=ExplodingEquityProvider(),
+    )
+
+    rows = await service.scan_many(run.id, ["GOOD", "BAD"])
+
+    assert rows["GOOD"].status == "complete"
+    assert rows["BAD"].status == "failed"
+    assert store.get_symbol(run.id, "GOOD").option_scan_status == "complete"
+    assert store.get_symbol(run.id, "BAD").option_scan_status == "failed"
+
+
+class AuthMarketData:
+    async def scan_symbol(self, symbol):
+        raise RobinhoodAuthRequired("authentication required")
+
+
+@pytest.mark.asyncio
+async def test_auth_failure_is_not_downgraded_to_symbol_failure():
+    store, run = make_store(["AUTH"])
+    service = MarketDeepScanService(
+        market_data=AuthMarketData(),
+        store=store,
+        risk_context_provider=FakeRiskContextProvider(),
+    )
+
+    with pytest.raises(RobinhoodAuthRequired):
+        await service.scan_symbol(run.id, "AUTH")
