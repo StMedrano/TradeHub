@@ -14,6 +14,14 @@ describe("scannerProgress", () => {
     })).toBe(25);
   });
 
+  it("uses capped deep scan target when present", () => {
+    expect(scannerProgress({
+      symbols_prefiltered: 200,
+      deep_scan_target: 100,
+      symbols_deep_scanned: 50
+    })).toBe(50);
+  });
+
   it("returns zero when no symbols survived prefilter", () => {
     expect(scannerProgress({
       symbols_prefiltered: 0,
