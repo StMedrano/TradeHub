@@ -59,7 +59,12 @@ class MarketScanWorker:
         self._stop.set()
         self._wake.set()
         if self._task is not None:
-            await self._task
+            if not self._task.done():
+                self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
             self._task = None
 
     def create_or_queue_run(
@@ -127,20 +132,22 @@ class MarketScanWorker:
                 await coordinator.discover(run_id)
 
             store.set_run_status(run_id, "deep_scanning")
-            symbols = coordinator.next_deep_scan_symbols(
-                run_id,
-                settings.market_scanner_max_deep_symbols,
-            )
-            results = (
-                await deep_scan.scan_many(run_id, symbols)
-                if symbols
-                else {}
-            )
+            has_failure = False
 
-            has_failure = any(
-                result.status == "failed"
-                for result in results.values()
-            )
+            while True:
+                symbols = coordinator.next_deep_scan_symbols(
+                    run_id,
+                    settings.market_scanner_max_deep_symbols,
+                )
+                if not symbols:
+                    break
+
+                results = await deep_scan.scan_many(run_id, symbols)
+                has_failure = has_failure or any(
+                    result.status == "failed"
+                    for result in results.values()
+                )
+
             store.set_run_status(
                 run_id,
                 "partial" if has_failure else "complete",
