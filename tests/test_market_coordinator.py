@@ -10,6 +10,7 @@ from app.db import Base
 from app.market_scanner.coordinator import MarketUniverseCoordinator
 from app.market_scanner.store import MarketScannerStore
 from app.market_scanner.types import DiscoveredSymbol, EquityScreenResult
+from app.robinhood.client import RobinhoodAuthRequired
 
 
 def make_store():
@@ -152,3 +153,51 @@ def test_deep_scan_queue_honors_configured_cycle_cap(monkeypatch):
     coordinator = MarketUniverseCoordinator(FakeScanner([]), store, FakePrefilter())
 
     assert len(coordinator.next_deep_scan_symbols(run.id, 10)) == 1
+
+
+
+class ErrorPrefilter(FakePrefilter):
+    def __init__(self, *, auth=False):
+        super().__init__()
+        self.auth = auth
+
+    async def screen(self, symbol, watchlist_priority, capacity, **kwargs):
+        if symbol == "BAD":
+            if self.auth:
+                raise RobinhoodAuthRequired("authentication required")
+            raise RuntimeError("fundamentals unavailable")
+        return await super().screen(symbol, watchlist_priority, capacity, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_prefilter_failure_rejects_only_that_symbol_and_counts_error():
+    store = make_store()
+    run = create_run(store)
+    coordinator = MarketUniverseCoordinator(
+        FakeScanner([
+            DiscoveredSymbol("GOOD", "slice"),
+            DiscoveredSymbol("BAD", "slice"),
+        ]),
+        store,
+        ErrorPrefilter(),
+    )
+
+    await coordinator.discover(run.id)
+
+    assert store.get_symbol(run.id, "GOOD").equity_screen_status == "passed"
+    assert store.get_symbol(run.id, "BAD").equity_screen_status == "rejected"
+    assert store.get_run(run.id).error_count == 1
+
+
+@pytest.mark.asyncio
+async def test_prefilter_auth_failure_aborts_discovery():
+    store = make_store()
+    run = create_run(store)
+    coordinator = MarketUniverseCoordinator(
+        FakeScanner([DiscoveredSymbol("BAD", "slice")]),
+        store,
+        ErrorPrefilter(auth=True),
+    )
+
+    with pytest.raises(RobinhoodAuthRequired):
+        await coordinator.discover(run.id)
