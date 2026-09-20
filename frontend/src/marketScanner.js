@@ -1,8 +1,13 @@
 export function scannerProgress(status) {
   const eligible = Number(status?.symbols_prefiltered || 0);
+  const target = Number(
+    status?.deep_scan_target === null || status?.deep_scan_target === undefined
+      ? eligible
+      : status.deep_scan_target
+  );
   const scanned = Number(status?.symbols_deep_scanned || 0);
-  if (eligible <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((scanned / eligible) * 100)));
+  if (target <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((scanned / target) * 100)));
 }
 
 export function scannerStatusTone(status) {
