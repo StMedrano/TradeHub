@@ -44,7 +44,10 @@ class FakeCoordinator:
         return len(self.symbols_to_scan)
 
     def next_deep_scan_symbols(self, run_id, limit):
-        return self.symbols_to_scan[:limit]
+        return [
+            row.symbol
+            for row in self.store.stale_symbol_candidates(run_id, limit)
+        ]
 
 
 class FakeDeepScan:
@@ -202,3 +205,101 @@ async def test_resume_skips_discovery_when_persisted_universe_exists():
     assert store.get_run(run.id).status == "complete"
     assert store.get_symbol(run.id, "AAPL").option_scan_status == "complete"
     db.close()
+
+
+
+@pytest.mark.asyncio
+async def test_worker_processes_all_deep_scan_batches_before_completing(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "market_scanner_max_deep_symbols", 2)
+    factory, _ = session_factory()
+    symbols = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    worker = worker_with_fakes(factory, symbols=symbols)
+    run = worker.create_or_queue_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={},
+    )
+
+    await worker.run_once(run.id)
+
+    db = factory()
+    store = MarketScannerStore(db)
+    assert store.get_run(run.id).status == "complete"
+    assert all(
+        store.get_symbol(run.id, symbol).option_scan_status == "complete"
+        for symbol in symbols
+    )
+    db.close()
+
+
+class BlockingDeepScan:
+    def __init__(self, store):
+        self.store = store
+        self.started = asyncio.Event()
+
+    async def scan_many(self, run_id, symbols):
+        first = symbols[0]
+        self.store.mark_deep_scan(
+            run_id,
+            first,
+            status="complete",
+            market_filter_passes=1,
+            mechanical_match_count=0,
+            near_miss_count=0,
+            tool_errors={},
+        )
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_worker_stop_cancels_active_sweep_and_restart_requeues(monkeypatch):
+    import asyncio
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "market_scanner_enabled", True)
+    factory, _ = session_factory()
+    blocker_box = {}
+
+    def coordinator_factory(store):
+        return FakeCoordinator(store, ["AAA", "BBB"])
+
+    def deep_factory(store, db):
+        blocker = BlockingDeepScan(store)
+        blocker_box["value"] = blocker
+        return blocker
+
+    worker = MarketScanWorker(
+        session_factory=factory,
+        coordinator_factory=coordinator_factory,
+        deep_scan_factory=deep_factory,
+    )
+    await worker.start()
+    run = worker.create_or_queue_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={},
+    )
+
+    while "value" not in blocker_box:
+        await asyncio.sleep(0)
+    await asyncio.wait_for(blocker_box["value"].started.wait(), timeout=1)
+    await asyncio.wait_for(worker.stop(), timeout=1)
+
+    monkeypatch.setattr(settings, "market_scanner_enabled", False)
+    recovery_worker = MarketScanWorker(
+        session_factory=factory,
+        coordinator_factory=coordinator_factory,
+        deep_scan_factory=deep_factory,
+    )
+    await recovery_worker.start()
+
+    db = factory()
+    store = MarketScannerStore(db)
+    assert store.get_run(run.id).status == "queued"
+    assert store.get_symbol(run.id, "AAA").option_scan_status == "complete"
+    assert store.get_symbol(run.id, "BBB").option_scan_status == "pending"
+    db.close()
+    await recovery_worker.stop()
