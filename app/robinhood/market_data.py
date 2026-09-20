@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.config import settings
-from app.robinhood.client import RobinhoodTradingMCP
+from app.robinhood.client import RobinhoodAuthRequired, RobinhoodTradingMCP
 from app.robinhood.normalize import extract_candidate_records, extract_records, find_first_list, payload_shape
 from app.robinhood.schema_args import build_arguments
 
@@ -336,6 +336,8 @@ class RobinhoodMarketDataService:
                 {"symbol": symbol},
                 catalog,
             )
+        except RobinhoodAuthRequired:
+            raise
         except Exception as exc:
             errors["get_option_chains"] = str(exc)
 
@@ -351,6 +353,8 @@ class RobinhoodMarketDataService:
                 catalog,
             )
             underlying_price = _equity_quote_price(equity_quote)
+        except RobinhoodAuthRequired:
+            raise
         except Exception as exc:
             errors["get_equity_quotes"] = str(exc)
 
@@ -373,6 +377,8 @@ class RobinhoodMarketDataService:
                 catalog,
             )
             instruments = initial_instruments
+        except RobinhoodAuthRequired:
+            raise
         except Exception as exc:
             errors["get_option_instruments"] = str(exc)
 
@@ -405,6 +411,8 @@ class RobinhoodMarketDataService:
                         )
                     )
                     strike_search_count += 1
+                except RobinhoodAuthRequired:
+                    raise
                 except Exception as exc:
                     errors[f"get_option_instruments:{strike}"] = str(exc)
 
@@ -445,6 +453,8 @@ class RobinhoodMarketDataService:
                     {"symbol": symbol, "option_ids": option_ids[:100]},
                     catalog,
                 )
+            except RobinhoodAuthRequired:
+                raise
             except Exception as exc:
                 errors["get_option_quotes"] = str(exc)
 

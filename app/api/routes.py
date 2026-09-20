@@ -11,7 +11,7 @@ from app.api.schemas import ApprovalAction, CandidatePromotionRequest, PauseAck,
 from app.config import RiskCapitalMode, settings
 from app.db import SessionLocal
 from app.domain.models import AccountRiskSnapshot, RiskPolicy, StrategyType, TradeIntent
-from app.persistence.models import AuditEvent, SimulationPosition, TradeProposal, TradeProposalDetail, UnderlyingPause
+from app.persistence.models import AuditEvent, MarketScanRun, SimulationPosition, TradeProposal, TradeProposalDetail, UnderlyingPause
 from app.risk.manager import RiskManager
 from app.risk.state import portfolio_risk_state_service, simulation_risk_state_service
 from app.robinhood.client import RobinhoodTradingMCP
@@ -411,6 +411,9 @@ def dashboard_summary(db: Session = Depends(db_session)):
     active_pauses = db.scalars(
         select(UnderlyingPause).where(UnderlyingPause.acknowledged.is_(False))
     ).all()
+    latest_market_scan = db.scalar(
+        select(MarketScanRun).order_by(MarketScanRun.created_at.desc())
+    )
 
     snapshot = robinhood_read_service.snapshot
     risk_state = _effective_risk_state(db)
@@ -471,6 +474,22 @@ def dashboard_summary(db: Session = Depends(db_session)):
         "daily_loss_breaker_pct": settings.daily_loss_breaker_pct,
         "liquidity_max_spread_pct": settings.liquidity_max_spread_pct,
         "system_status": "healthy",
+        "market_scanner_enabled": settings.market_scanner_enabled,
+        "market_scan_status": (
+            latest_market_scan.status if latest_market_scan is not None else "idle"
+        ),
+        "market_scan_run_id": (
+            latest_market_scan.id if latest_market_scan is not None else None
+        ),
+        "market_scan_matches": (
+            latest_market_scan.matches_found if latest_market_scan is not None else 0
+        ),
+        "market_scan_symbols_discovered": (
+            latest_market_scan.symbols_discovered if latest_market_scan is not None else 0
+        ),
+        "market_scan_symbols_deep_scanned": (
+            latest_market_scan.symbols_deep_scanned if latest_market_scan is not None else 0
+        ),
     }
 
 

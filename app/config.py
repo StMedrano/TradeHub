@@ -28,15 +28,23 @@ class Settings(BaseSettings):
     max_portfolio_loss_pct: float = Field(default=0.20, gt=0, le=1)
     daily_loss_breaker_pct: float = Field(default=0.10, gt=0, le=1)
 
-    liquidity_max_spread_pct: float = Field(default=0.12, gt=0, le=1)
-    strategy_min_open_interest: int = Field(default=100, ge=0)
-    strategy_min_volume: int = Field(default=10, ge=0)
-    strategy_min_dte: int = Field(default=14, ge=0, le=3650)
-    strategy_max_dte: int = Field(default=60, ge=1, le=3650)
+    liquidity_max_spread_pct: float = Field(default=0.10, gt=0, le=1)
+    strategy_min_open_interest: int = Field(default=500, ge=0)
+    strategy_min_volume: int = Field(default=50, ge=0)
+    strategy_min_dte: int = Field(default=21, ge=0, le=3650)
+    strategy_max_dte: int = Field(default=45, ge=1, le=3650)
     strategy_short_delta_min: float = Field(default=0.15, ge=0, le=1)
-    strategy_short_delta_max: float = Field(default=0.35, ge=0, le=1)
+    strategy_short_delta_max: float = Field(default=0.30, ge=0, le=1)
     strategy_watchlist: str = ""
     strategy_watchlist_max_symbols: int = Field(default=5, ge=1, le=20)
+
+    market_scanner_enabled: bool = False
+    market_scanner_max_deep_symbols: int = Field(default=100, ge=1, le=1000)
+    market_scanner_option_concurrency: int = Field(default=2, ge=1, le=10)
+    market_scanner_min_price: float = Field(default=5.0, ge=0)
+    market_scanner_min_avg_volume: int = Field(default=1_000_000, ge=0)
+    market_scanner_min_market_cap: int = Field(default=1_000_000_000, ge=0)
+    market_scanner_exclude_earnings: bool = True
     entry_timeout_seconds: int = Field(default=90, ge=1)
     price_walk_increment: float = Field(default=0.01, gt=0)
     max_slippage_pct: float = Field(default=0.08, ge=0, le=1)

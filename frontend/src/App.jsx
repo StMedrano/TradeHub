@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  opportunityAgeLabel,
+  scannerIsActive,
+  scannerProgress,
+  scannerStatusTone
+} from "./marketScanner";
+import {
   Theme,
   Box,
   Flex,
@@ -43,6 +49,7 @@ import {
 
 const NAV = [
   ["overview", "Overview", DashboardIcon],
+  ["marketScanner", "Market Scanner", BarChartIcon],
   ["opportunities", "Trade Opportunities", LightningBoltIcon],
   ["positions", "Positions", BackpackIcon],
   ["approvals", "Approvals", CheckCircledIcon],
@@ -54,6 +61,7 @@ const NAV = [
 
 const SECTION_COPY = {
   overview: ["Overview", "Your portfolio at a glance"],
+  marketScanner: ["Market Scanner", "Whole-market Robinhood discovery with mechanical CSP and TradeHub risk filters"],
   opportunities: ["Trade Opportunities", "Candidates produced by the strategy engine"],
   positions: ["Positions", "Open Robinhood Agentic option and equity exposure"],
   approvals: ["Approvals", "Review risk-approved trade intents before execution"],
@@ -344,7 +352,7 @@ function Sidebar({ section, setSection, approvalCount }) {
       </Flex>
 
       <nav className="nav-list">
-        {NAV.slice(0, 7).map(([key, label, Icon]) => (
+        {NAV.slice(0, 8).map(([key, label, Icon]) => (
           <button
             key={key}
             className={"nav-item " + (section === key ? "active" : "")}
@@ -428,6 +436,10 @@ export default function App() {
   const [pauses, setPauses] = useState([]);
   const [activity, setActivity] = useState([]);
   const [positions, setPositions] = useState({ equities: [], options: [] });
+  const [marketScannerStatus, setMarketScannerStatus] = useState(null);
+  const [marketOpportunities, setMarketOpportunities] = useState([]);
+  const [marketNearMisses, setMarketNearMisses] = useState([]);
+  const [marketScanStarting, setMarketScanStarting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scanSymbol, setScanSymbol] = useState("SPY");
   const [scanResult, setScanResult] = useState(null);
@@ -452,16 +464,26 @@ export default function App() {
         fetch("/api/approvals"),
         fetch("/api/pauses"),
         fetch("/api/activity"),
-        fetch("/api/positions")
+        fetch("/api/positions"),
+        fetch("/api/market-scanner/status"),
+        fetch("/api/market-scanner/opportunities"),
+        fetch("/api/market-scanner/near-misses")
       ]);
 
       if (responses.some((r) => !r.ok)) {
         throw new Error("TradeHub API returned an error.");
       }
 
-      const [nextSummary, nextApprovals, nextPauses, nextActivity, nextPositions] = await Promise.all(
-        responses.map((r) => r.json())
-      );
+      const [
+        nextSummary,
+        nextApprovals,
+        nextPauses,
+        nextActivity,
+        nextPositions,
+        nextMarketScannerStatus,
+        nextMarketOpportunities,
+        nextMarketNearMisses
+      ] = await Promise.all(responses.map((r) => r.json()));
 
       if (
         nextApprovals.length > previousApprovals.current &&
@@ -480,6 +502,9 @@ export default function App() {
       setPauses(nextPauses);
       setActivity(nextActivity);
       setPositions(nextPositions);
+      setMarketScannerStatus(nextMarketScannerStatus);
+      setMarketOpportunities(nextMarketOpportunities.items || []);
+      setMarketNearMisses(nextMarketNearMisses.items || []);
       setError("");
     } catch (err) {
       setError(err.message || "Unable to load TradeHub.");
@@ -493,6 +518,12 @@ export default function App() {
     const timer = window.setInterval(() => refresh(true), 10000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!scannerIsActive(marketScannerStatus?.status)) return undefined;
+    const timer = window.setInterval(() => refresh(true), 5000);
+    return () => window.clearInterval(timer);
+  }, [marketScannerStatus?.status, refresh]);
 
   const title = SECTION_COPY[section][0];
   const subtitle = SECTION_COPY[section][1];
@@ -547,15 +578,16 @@ export default function App() {
     }
   }
 
-  async function promoteCandidate(candidate) {
-    if (!candidate?.option_id || !candidateResult?.symbol) return;
+  async function promoteCandidate(candidate, symbolOverride = null) {
+    const symbol = symbolOverride || candidateResult?.symbol;
+    if (!candidate?.option_id || !symbol) return;
     setPromotingId(candidate.option_id);
     try {
       const response = await fetch("/api/opportunities/promote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          symbol: candidateResult.symbol,
+          symbol,
           option_id: candidate.option_id
         })
       });
@@ -571,7 +603,9 @@ export default function App() {
       }
 
       await refresh(true);
-      await scanOptions();
+      if (!symbolOverride) {
+        await scanOptions();
+      }
       setSection("approvals");
       setError("");
     } catch (err) {
@@ -610,6 +644,29 @@ export default function App() {
       setError(err.message || "Option scan failed.");
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function runMarketScan() {
+    setMarketScanStarting(true);
+    try {
+      const response = await fetch("/api/market-scanner/run", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        const detail = body.detail;
+        if (typeof detail === "object" && detail?.reasons) {
+          throw new Error(detail.reasons.join(" · "));
+        }
+        throw new Error(
+          typeof detail === "string" ? detail : "Whole-market scan could not be queued."
+        );
+      }
+      await refresh(true);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Whole-market scan could not be queued.");
+    } finally {
+      setMarketScanStarting(false);
     }
   }
 
@@ -702,6 +759,238 @@ export default function App() {
             <ActivityTable activity={activity.slice(0, 6)} />
           </Card>
         </>
+      );
+    }
+
+    if (section === "marketScanner") {
+      const active = scannerIsActive(marketScannerStatus?.status);
+      const progress = scannerProgress(marketScannerStatus);
+      const statusTone = scannerStatusTone(marketScannerStatus?.status);
+
+      return (
+        <Flex direction="column" gap="4">
+          <Card className="large-card">
+            <Flex justify="between" align="center" gap="4" wrap="wrap">
+              <Box>
+                <Flex align="center" gap="2" wrap="wrap">
+                  <Heading size="4">Whole-Market Scanner</Heading>
+                  <Badge color={statusTone} variant="soft">
+                    {(marketScannerStatus?.status || "idle").replaceAll("_", " ")}
+                  </Badge>
+                  <Badge color="green" variant="soft">MECHANICAL ONLY</Badge>
+                  <Badge color="gray" variant="soft">NO ORDER EXECUTION</Badge>
+                </Flex>
+                <Text as="div" size="2" color="gray" mt="2">
+                  Discovers Robinhood-tradable symbols, applies the configured equity filters,
+                  deep-scans options with bounded concurrency, and persists matches for review.
+                </Text>
+              </Box>
+              <Button
+                onClick={runMarketScan}
+                disabled={
+                  marketScanStarting ||
+                  active ||
+                  marketScannerStatus?.scanner_enabled !== true
+                }
+              >
+                {marketScanStarting || active ? <ReloadIcon className="spin" /> : <BarChartIcon />}
+                {active ? "Scan Running" : marketScanStarting ? "Queueing" : "Run Market Scan"}
+              </Button>
+            </Flex>
+
+            {marketScannerStatus?.scanner_enabled !== true ? (
+              <Callout.Root color="amber" mt="4">
+                <Callout.Icon><LockClosedIcon /></Callout.Icon>
+                <Callout.Text>
+                  Whole-market scanning is disabled by default. Set MARKET_SCANNER_ENABLED=true
+                  only when you are ready to run the read-only discovery worker.
+                </Callout.Text>
+              </Callout.Root>
+            ) : null}
+          </Card>
+
+          <Grid className="scanner-metric-grid" columns={{ initial: "2", md: "3", xl: "6" }} gap="3">
+            <Box className="position-stat">
+              <Text size="1" color="gray">Discovered</Text>
+              <Heading size="5">{marketScannerStatus?.symbols_discovered ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Equity Screen</Text>
+              <Heading size="5">{marketScannerStatus?.symbols_prefiltered ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Deep Scanned</Text>
+              <Heading size="5">{marketScannerStatus?.symbols_deep_scanned ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Contracts</Text>
+              <Heading size="5">{marketScannerStatus?.contracts_evaluated ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Matches</Text>
+              <Heading size="5">{marketScannerStatus?.matches_found ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Errors</Text>
+              <Heading size="5">{marketScannerStatus?.error_count ?? 0}</Heading>
+            </Box>
+          </Grid>
+
+          <Card className="large-card scanner-progress-card">
+            <Flex justify="between" align="center" mb="2">
+              <Box>
+                <Heading size="4">Sweep Progress</Heading>
+                <Text size="2" color="gray">
+                  Risk capital: {marketScannerStatus?.risk_capital_mode || "—"} ·
+                  {" "}equity {marketScannerStatus?.risk_equity ? money(Number(marketScannerStatus.risk_equity)) : "—"} ·
+                  {" "}per-trade cap {marketScannerStatus?.per_trade_loss_limit ? money(Number(marketScannerStatus.per_trade_loss_limit)) : "—"} ·
+                  {" "}portfolio cap {marketScannerStatus?.portfolio_loss_limit ? money(Number(marketScannerStatus.portfolio_loss_limit)) : "—"}
+                </Text>
+              </Box>
+              <Text size="2" weight="bold">{progress}%</Text>
+            </Flex>
+            <Progress value={progress} color={statusTone === "red" ? "red" : statusTone === "amber" ? "amber" : "green"} />
+            <Flex justify="between" mt="2" gap="3" wrap="wrap">
+              <Text size="1" color="gray">
+                Run {marketScannerStatus?.run_id || "not started"} · target {marketScannerStatus?.deep_scan_target ?? 0} symbols
+              </Text>
+              <Text size="1" color="gray">
+                {marketScannerStatus?.completed_at
+                  ? "Completed " + formatDate(marketScannerStatus.completed_at)
+                  : marketScannerStatus?.started_at
+                    ? "Started " + formatDate(marketScannerStatus.started_at)
+                    : "Waiting to start"}
+              </Text>
+            </Flex>
+          </Card>
+
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="4" gap="3" wrap="wrap">
+              <Box>
+                <Heading size="4">Mechanical Matches</Heading>
+                <Text size="2" color="gray">
+                  Contracts that passed configured market filters and the TradeHub risk model.
+                  This is not a recommendation or an order instruction.
+                </Text>
+              </Box>
+              <Badge color="green" variant="soft">{marketOpportunities.length} persisted</Badge>
+            </Flex>
+
+            {marketOpportunities.length ? (
+              <div className="table-scroll">
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>Symbol</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Expiry</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Strike</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Delta</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>OI</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Volume</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Credit</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Max Loss</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Score</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Age</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Action</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {marketOpportunities.map((row) => (
+                      <Table.Row key={row.run_id + ":" + row.option_id}>
+                        <Table.Cell><Text weight="bold">{row.symbol}</Text></Table.Cell>
+                        <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                        <Table.Cell>{row.strike_price ? money(Number(row.strike_price)) : "—"}</Table.Cell>
+                        <Table.Cell>{row.delta ?? "—"}</Table.Cell>
+                        <Table.Cell>{row.open_interest ?? "—"}</Table.Cell>
+                        <Table.Cell>{row.volume ?? "—"}</Table.Cell>
+                        <Table.Cell>{money(Number(row.estimated_credit || 0))}</Table.Cell>
+                        <Table.Cell>{money(Number(row.estimated_max_loss || 0))}</Table.Cell>
+                        <Table.Cell>{Number(row.score || 0).toFixed(1)}</Table.Cell>
+                        <Table.Cell>{opportunityAgeLabel(row.scanned_at)}</Table.Cell>
+                        <Table.Cell>
+                          <Tooltip content="Promotion performs a fresh Robinhood rescan and authoritative risk check.">
+                            <Button
+                              size="1"
+                              disabled={promotingId === row.option_id}
+                              onClick={() => promoteCandidate(row, row.symbol)}
+                            >
+                              {promotingId === row.option_id ? <ReloadIcon className="spin" /> : <CheckCircledIcon />}
+                              Promote
+                            </Button>
+                          </Tooltip>
+                        </Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+            ) : (
+              <EmptyPanel
+                icon={BarChartIcon}
+                title="No persisted market matches"
+                body="A completed sweep may legitimately return zero contracts after equity, options-liquidity, earnings, capital, and TradeHub risk filters."
+              />
+            )}
+          </Card>
+
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="4" gap="3" wrap="wrap">
+              <Box>
+                <Heading size="4">Near Misses</Heading>
+                <Text size="2" color="gray">
+                  Mechanically interesting candidates that failed a required collateral,
+                  earnings, authoritative-risk, or RiskManager gate.
+                </Text>
+              </Box>
+              <Badge color="amber" variant="soft">{marketNearMisses.length} persisted</Badge>
+            </Flex>
+
+            {marketNearMisses.length ? (
+              <div className="table-scroll">
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>Symbol</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Expiry</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Strike</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Stage</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Reason</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Min Equity</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Age</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {marketNearMisses.slice(0, 100).map((row) => (
+                      <Table.Row key={row.run_id + ":" + row.option_id}>
+                        <Table.Cell><Text weight="bold">{row.symbol}</Text></Table.Cell>
+                        <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                        <Table.Cell>{row.strike_price ? money(Number(row.strike_price)) : "—"}</Table.Cell>
+                        <Table.Cell>
+                          <Badge color="amber" variant="soft">
+                            {(row.rejection_stage || "filtered").replaceAll("_", " ")}
+                          </Badge>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <Text size="1" color="gray">
+                            {row.risk_reasons?.length ? row.risk_reasons.join(" · ") : "Filtered by configured rules."}
+                          </Text>
+                        </Table.Cell>
+                        <Table.Cell>
+                          {row.minimum_equity_for_trade_limit
+                            ? money(Number(row.minimum_equity_for_trade_limit))
+                            : "—"}
+                        </Table.Cell>
+                        <Table.Cell>{opportunityAgeLabel(row.scanned_at)}</Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+            ) : (
+              <Text size="2" color="gray">No near misses are persisted for the latest scan.</Text>
+            )}
+          </Card>
+        </Flex>
       );
     }
 

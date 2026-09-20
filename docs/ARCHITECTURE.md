@@ -48,3 +48,28 @@ On assignment or deep-ITM/approaching-expiration risk:
 4. Display the hold in the dashboard.
 5. Require manual acknowledgement.
 6. Do not place a stock/options order intended to resolve the assignment.
+
+
+## Whole-market scanner boundary
+
+The market-universe scanner is a read-only discovery subsystem that sits upstream of proposal promotion:
+
+```text
+Robinhood scanner
+  -> TradeHub universe prefilter
+  -> bounded option deep scan
+  -> PhaseOneCandidateEngine
+  -> RiskManager
+  -> persisted mechanical snapshot
+  -> fresh-rescan promotion boundary
+```
+
+The scanner subsystem may use Robinhood scanner-management and market-read tools only. It has no dependency on `review_option_order`, `place_option_order`, or `cancel_option_order`, and scanner/API responses keep `execution_enabled=false`.
+
+Persisted scanner opportunities are informational mechanical matches. They are never converted directly into proposals. The existing promotion boundary always performs a fresh Robinhood symbol scan and a fresh authoritative TradeHub risk evaluation before a proposal can enter the approval queue.
+
+Whole-market scans persist run, symbol, and opportunity state so an interrupted `discovering` or `deep_scanning` run can be requeued after restart without discarding completed symbol checkpoints. Only one market scan may be active at a time, and expensive option reads are bounded by the configured concurrency limit.
+
+Risk-capital isolation is unchanged: simulation scans use the isolated simulation ledger and configured virtual capital, while live-account scans require authoritative synchronized Robinhood risk state. Watchlist membership affects processing priority only and never bypasses tradability, liquidity, earnings, collateral, or RiskManager gates.
+
+The scanner is disabled by default and must be explicitly enabled with `MARKET_SCANNER_ENABLED=true`.

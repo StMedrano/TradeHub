@@ -42,6 +42,27 @@
 - [ ] Bull put/bear call plugin
 - [ ] Iron condor plugin
 
+## Milestone 3A — whole-market discovery
+- [x] Robinhood Agentic saved-scan discovery adapter
+- [x] Price-sliced market discovery with downstream hard-filter enforcement
+- [x] Watchlist-as-priority rather than watchlist-as-universe
+- [x] Robinhood tradability, minimum-price, stock-volume, and market-cap prefilters
+- [x] Single-stock earnings-before-expiration exclusion
+- [x] Persisted scan runs, per-symbol checkpoints, opportunities, and near misses
+- [x] Fair stale/never-scanned queue scheduling
+- [x] Bounded option-chain deep-scan concurrency
+- [x] Reuse of PhaseOneCandidateEngine and RiskManager
+- [x] Simulation/live risk-capital isolation
+- [x] Restart recovery and single-active-run enforcement
+- [x] Partial MCP failure handling without discarding successful symbols
+- [x] Dedicated market-scanner API
+- [x] Whole-market scanner dashboard with persisted progress
+- [x] Fresh-rescan promotion boundary for cached opportunities
+- [x] Scanner order-tool safety regression
+- [x] Disabled-by-default rollout via MARKET_SCANNER_ENABLED=false
+- [ ] Production-scale sweep tuning from observed Robinhood MCP latency/rate limits
+- [ ] Authentik/operator authorization before public exposure
+
 ## Milestone 4 — paging and operator controls
 - [ ] Pushover provider
 - [ ] Twilio provider
