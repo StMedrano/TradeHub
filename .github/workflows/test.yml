@@ -22,14 +22,7 @@ jobs:
 
       - name: Capture frontend lockfile
         working-directory: frontend
-        run: python3 - <<'PY'
-          import base64
-          from pathlib import Path
-          data = Path("package-lock.json").read_bytes()
-          print("TRADEHUB_LOCK_BEGIN")
-          print(base64.b64encode(data).decode())
-          print("TRADEHUB_LOCK_END")
-          PY
+        run: python3 -c 'import base64,pathlib; data=pathlib.Path("package-lock.json").read_bytes(); print("TRADEHUB_LOCK_BEGIN"); print(base64.b64encode(data).decode()); print("TRADEHUB_LOCK_END")'
 
       - name: Test frontend
         working-directory: frontend
