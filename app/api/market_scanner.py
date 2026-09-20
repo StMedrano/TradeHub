@@ -42,25 +42,51 @@ def _run_dict(run: MarketScanRun | None) -> dict[str, object]:
             "symbols_discovered": 0,
             "symbols_prefiltered": 0,
             "symbols_deep_scanned": 0,
+            "deep_scan_target": 0,
             "contracts_evaluated": 0,
             "matches_found": 0,
             "error_count": 0,
             "risk_capital_mode": settings.risk_capital_mode.value,
             "risk_equity": None,
+            "per_trade_loss_limit": None,
+            "portfolio_loss_limit": None,
             "started_at": None,
             "completed_at": None,
         }
+
+    try:
+        config = json.loads(run.config_json or "{}")
+    except json.JSONDecodeError:
+        config = {}
+
+    max_deep_symbols = int(
+        config.get(
+            "max_deep_symbols",
+            settings.market_scanner_max_deep_symbols,
+        )
+    )
+    max_trade_loss_pct = Decimal(
+        str(config.get("max_trade_loss_pct", settings.max_trade_loss_pct))
+    )
+    max_portfolio_loss_pct = Decimal(
+        str(config.get("max_portfolio_loss_pct", settings.max_portfolio_loss_pct))
+    )
+    risk_equity = Decimal(str(run.risk_equity))
+
     return {
         "run_id": run.id,
         "status": run.status,
         "symbols_discovered": run.symbols_discovered,
         "symbols_prefiltered": run.symbols_prefiltered,
         "symbols_deep_scanned": run.symbols_deep_scanned,
+        "deep_scan_target": min(run.symbols_prefiltered, max_deep_symbols),
         "contracts_evaluated": run.contracts_evaluated,
         "matches_found": run.matches_found,
         "error_count": run.error_count,
         "risk_capital_mode": run.risk_capital_mode,
         "risk_equity": str(run.risk_equity),
+        "per_trade_loss_limit": str(risk_equity * max_trade_loss_pct),
+        "portfolio_loss_limit": str(risk_equity * max_portfolio_loss_pct),
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "created_at": run.created_at,
