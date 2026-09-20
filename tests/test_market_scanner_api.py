@@ -134,3 +134,40 @@ def test_status_returns_latest_run_counts():
     assert body["symbols_discovered"] == 100
     assert body["symbols_prefiltered"] == 20
     assert body["execution_enabled"] is False
+
+
+
+@pytest.mark.asyncio
+async def test_market_snapshot_cannot_be_promoted_without_fresh_symbol_rescan(
+    monkeypatch,
+):
+    from app.api import routes
+    from app.api.schemas import CandidatePromotionRequest
+    from app.robinhood.market_data import OptionScanResult
+
+    db = make_session()
+    monkeypatch.setattr(settings, "robinhood_mcp_enabled", True)
+    monkeypatch.setattr(settings, "risk_capital_mode", RiskCapitalMode.SIMULATION)
+    monkeypatch.setattr(settings, "simulation_capital", 750000.0)
+
+    async def no_op_sync():
+        return routes.robinhood_read_service.snapshot
+
+    async def fresh_scan_without_old_option(symbol: str):
+        return OptionScanResult(
+            symbol=symbol,
+            scanned_at="2026-09-19T16:00:00+00:00",
+            contracts=[],
+        )
+
+    monkeypatch.setattr(routes.robinhood_read_service, "sync_once", no_op_sync)
+    monkeypatch.setattr(routes.robinhood_market_data, "scan_symbol", fresh_scan_without_old_option)
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.promote_phase_one_candidate(
+            CandidatePromotionRequest(symbol="AAPL", option_id="old-opt"),
+            db,
+        )
+
+    assert exc.value.status_code == 409
+    assert "no longer passes" in str(exc.value.detail)
