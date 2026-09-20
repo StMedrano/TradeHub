@@ -20,6 +20,17 @@ jobs:
         working-directory: frontend
         run: npm install
 
+      - name: Capture frontend lockfile
+        working-directory: frontend
+        run: python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          data = Path("package-lock.json").read_bytes()
+          print("TRADEHUB_LOCK_BEGIN")
+          print(base64.b64encode(data).decode())
+          print("TRADEHUB_LOCK_END")
+          PY
+
       - name: Test frontend
         working-directory: frontend
         run: npm test
