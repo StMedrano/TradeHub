@@ -762,6 +762,236 @@ export default function App() {
       );
     }
 
+    if (section === "marketScanner") {
+      const active = scannerIsActive(marketScannerStatus?.status);
+      const progress = scannerProgress(marketScannerStatus);
+      const statusTone = scannerStatusTone(marketScannerStatus?.status);
+
+      return (
+        <Flex direction="column" gap="4">
+          <Card className="large-card">
+            <Flex justify="between" align="center" gap="4" wrap="wrap">
+              <Box>
+                <Flex align="center" gap="2" wrap="wrap">
+                  <Heading size="4">Whole-Market Scanner</Heading>
+                  <Badge color={statusTone} variant="soft">
+                    {(marketScannerStatus?.status || "idle").replaceAll("_", " ")}
+                  </Badge>
+                  <Badge color="green" variant="soft">MECHANICAL ONLY</Badge>
+                  <Badge color="gray" variant="soft">NO ORDER EXECUTION</Badge>
+                </Flex>
+                <Text as="div" size="2" color="gray" mt="2">
+                  Discovers Robinhood-tradable symbols, applies the configured equity filters,
+                  deep-scans options with bounded concurrency, and persists matches for review.
+                </Text>
+              </Box>
+              <Button
+                onClick={runMarketScan}
+                disabled={
+                  marketScanStarting ||
+                  active ||
+                  marketScannerStatus?.scanner_enabled !== true
+                }
+              >
+                {marketScanStarting || active ? <ReloadIcon className="spin" /> : <BarChartIcon />}
+                {active ? "Scan Running" : marketScanStarting ? "Queueing" : "Run Market Scan"}
+              </Button>
+            </Flex>
+
+            {marketScannerStatus?.scanner_enabled !== true ? (
+              <Callout.Root color="amber" mt="4">
+                <Callout.Icon><LockClosedIcon /></Callout.Icon>
+                <Callout.Text>
+                  Whole-market scanning is disabled by default. Set MARKET_SCANNER_ENABLED=true
+                  only when you are ready to run the read-only discovery worker.
+                </Callout.Text>
+              </Callout.Root>
+            ) : null}
+          </Card>
+
+          <Grid columns={{ initial: "2", md: "3", xl: "6" }} gap="3">
+            <Box className="position-stat">
+              <Text size="1" color="gray">Discovered</Text>
+              <Heading size="5">{marketScannerStatus?.symbols_discovered ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Equity Screen</Text>
+              <Heading size="5">{marketScannerStatus?.symbols_prefiltered ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Deep Scanned</Text>
+              <Heading size="5">{marketScannerStatus?.symbols_deep_scanned ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Contracts</Text>
+              <Heading size="5">{marketScannerStatus?.contracts_evaluated ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Matches</Text>
+              <Heading size="5">{marketScannerStatus?.matches_found ?? 0}</Heading>
+            </Box>
+            <Box className="position-stat">
+              <Text size="1" color="gray">Errors</Text>
+              <Heading size="5">{marketScannerStatus?.error_count ?? 0}</Heading>
+            </Box>
+          </Grid>
+
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="2">
+              <Box>
+                <Heading size="4">Sweep Progress</Heading>
+                <Text size="2" color="gray">
+                  Risk capital: {marketScannerStatus?.risk_capital_mode || "—"} ·
+                  {" "}equity {marketScannerStatus?.risk_equity ? money(Number(marketScannerStatus.risk_equity)) : "—"}
+                </Text>
+              </Box>
+              <Text size="2" weight="bold">{progress}%</Text>
+            </Flex>
+            <Progress value={progress} color={statusTone === "red" ? "red" : statusTone === "amber" ? "amber" : "green"} />
+            <Flex justify="between" mt="2" gap="3" wrap="wrap">
+              <Text size="1" color="gray">
+                Run {marketScannerStatus?.run_id || "not started"}
+              </Text>
+              <Text size="1" color="gray">
+                {marketScannerStatus?.completed_at
+                  ? "Completed " + formatDate(marketScannerStatus.completed_at)
+                  : marketScannerStatus?.started_at
+                    ? "Started " + formatDate(marketScannerStatus.started_at)
+                    : "Waiting to start"}
+              </Text>
+            </Flex>
+          </Card>
+
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="4" gap="3" wrap="wrap">
+              <Box>
+                <Heading size="4">Mechanical Matches</Heading>
+                <Text size="2" color="gray">
+                  Contracts that passed configured market filters and the TradeHub risk model.
+                  This is not a recommendation or an order instruction.
+                </Text>
+              </Box>
+              <Badge color="green" variant="soft">{marketOpportunities.length} persisted</Badge>
+            </Flex>
+
+            {marketOpportunities.length ? (
+              <div className="table-scroll">
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>Symbol</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Expiry</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Strike</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Delta</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>OI</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Volume</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Credit</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Max Loss</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Score</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Age</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Action</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {marketOpportunities.map((row) => (
+                      <Table.Row key={row.run_id + ":" + row.option_id}>
+                        <Table.Cell><Text weight="bold">{row.symbol}</Text></Table.Cell>
+                        <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                        <Table.Cell>{row.strike_price ? money(Number(row.strike_price)) : "—"}</Table.Cell>
+                        <Table.Cell>{row.delta ?? "—"}</Table.Cell>
+                        <Table.Cell>{row.open_interest ?? "—"}</Table.Cell>
+                        <Table.Cell>{row.volume ?? "—"}</Table.Cell>
+                        <Table.Cell>{money(Number(row.estimated_credit || 0))}</Table.Cell>
+                        <Table.Cell>{money(Number(row.estimated_max_loss || 0))}</Table.Cell>
+                        <Table.Cell>{Number(row.score || 0).toFixed(1)}</Table.Cell>
+                        <Table.Cell>{opportunityAgeLabel(row.scanned_at)}</Table.Cell>
+                        <Table.Cell>
+                          <Tooltip content="Promotion performs a fresh Robinhood rescan and authoritative risk check.">
+                            <Button
+                              size="1"
+                              disabled={promotingId === row.option_id}
+                              onClick={() => promoteCandidate(row, row.symbol)}
+                            >
+                              {promotingId === row.option_id ? <ReloadIcon className="spin" /> : <CheckCircledIcon />}
+                              Promote
+                            </Button>
+                          </Tooltip>
+                        </Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+            ) : (
+              <EmptyPanel
+                icon={BarChartIcon}
+                title="No persisted market matches"
+                body="A completed sweep may legitimately return zero contracts after equity, options-liquidity, earnings, capital, and TradeHub risk filters."
+              />
+            )}
+          </Card>
+
+          <Card className="large-card">
+            <Flex justify="between" align="center" mb="4" gap="3" wrap="wrap">
+              <Box>
+                <Heading size="4">Near Misses</Heading>
+                <Text size="2" color="gray">
+                  Mechanically interesting candidates that failed a required collateral,
+                  earnings, authoritative-risk, or RiskManager gate.
+                </Text>
+              </Box>
+              <Badge color="amber" variant="soft">{marketNearMisses.length} persisted</Badge>
+            </Flex>
+
+            {marketNearMisses.length ? (
+              <div className="table-scroll">
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>Symbol</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Expiry</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Strike</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Stage</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Reason</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Min Equity</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Age</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {marketNearMisses.slice(0, 100).map((row) => (
+                      <Table.Row key={row.run_id + ":" + row.option_id}>
+                        <Table.Cell><Text weight="bold">{row.symbol}</Text></Table.Cell>
+                        <Table.Cell>{row.expiration_date || "—"}</Table.Cell>
+                        <Table.Cell>{row.strike_price ? money(Number(row.strike_price)) : "—"}</Table.Cell>
+                        <Table.Cell>
+                          <Badge color="amber" variant="soft">
+                            {(row.rejection_stage || "filtered").replaceAll("_", " ")}
+                          </Badge>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <Text size="1" color="gray">
+                            {row.risk_reasons?.length ? row.risk_reasons.join(" · ") : "Filtered by configured rules."}
+                          </Text>
+                        </Table.Cell>
+                        <Table.Cell>
+                          {row.minimum_equity_for_trade_limit
+                            ? money(Number(row.minimum_equity_for_trade_limit))
+                            : "—"}
+                        </Table.Cell>
+                        <Table.Cell>{opportunityAgeLabel(row.scanned_at)}</Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+            ) : (
+              <Text size="2" color="gray">No near misses are persisted for the latest scan.</Text>
+            )}
+          </Card>
+        </Flex>
+      );
+    }
+
     if (section === "opportunities") {
       return (
         <Flex direction="column" gap="4">
