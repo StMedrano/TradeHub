@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -201,3 +202,72 @@ async def test_prefilter_auth_failure_aborts_discovery():
 
     with pytest.raises(RobinhoodAuthRequired):
         await coordinator.discover(run.id)
+
+
+
+class ProgressAwarePrefilter(FakePrefilter):
+    def __init__(self, store, run_id):
+        super().__init__()
+        self.store = store
+        self.run_id = run_id
+        self.observed_discovered = None
+
+    async def screen(self, symbol, watchlist_priority, capacity, **kwargs):
+        if self.observed_discovered is None:
+            self.observed_discovered = self.store.get_run(
+                self.run_id
+            ).symbols_discovered
+        return await super().screen(symbol, watchlist_priority, capacity, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_discovered_count_is_checkpointed_before_equity_prefiltering():
+    store = make_store()
+    run = create_run(store)
+    prefilter = ProgressAwarePrefilter(store, run.id)
+    coordinator = MarketUniverseCoordinator(
+        FakeScanner([
+            DiscoveredSymbol("AAA", "slice"),
+            DiscoveredSymbol("BBB", "slice"),
+        ]),
+        store,
+        prefilter,
+    )
+
+    await coordinator.discover(run.id)
+
+    assert prefilter.observed_discovered == 2
+
+
+class ConcurrentPrefilter(FakePrefilter):
+    def __init__(self):
+        super().__init__()
+        self.active = 0
+        self.max_seen = 0
+
+    async def screen(self, symbol, watchlist_priority, capacity, **kwargs):
+        self.active += 1
+        self.max_seen = max(self.max_seen, self.active)
+        await asyncio.sleep(0.01)
+        self.active -= 1
+        return await super().screen(symbol, watchlist_priority, capacity, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_equity_prefilter_uses_bounded_concurrency(monkeypatch):
+    monkeypatch.setattr(settings, "market_scanner_prefilter_concurrency", 2)
+    store = make_store()
+    run = create_run(store)
+    prefilter = ConcurrentPrefilter()
+    coordinator = MarketUniverseCoordinator(
+        FakeScanner([
+            DiscoveredSymbol(symbol, "slice")
+            for symbol in ("AAA", "BBB", "CCC", "DDD")
+        ]),
+        store,
+        prefilter,
+    )
+
+    await coordinator.discover(run.id)
+
+    assert prefilter.max_seen == 2
