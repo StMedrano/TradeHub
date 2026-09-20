@@ -181,7 +181,7 @@ async def test_deep_scan_uses_contract_multiplier_from_candidate():
 
     result = await service.scan_symbol(run.id, "ABC")
 
-    assert result.candidates[0]["estimated_max_loss"] == "450"
+    assert Decimal(result.candidates[0]["estimated_max_loss"]) == Decimal("450")
 
 
 @pytest.mark.asyncio
