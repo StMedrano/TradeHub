@@ -316,3 +316,80 @@ async def test_worker_stop_cancels_active_sweep_and_restart_requeues(monkeypatch
     assert store.get_symbol(run.id, "BBB").option_scan_status == "pending"
     db.close()
     await recovery_worker.stop()
+
+
+
+class ErrorCountingCoordinator(FakeCoordinator):
+    def __init__(self, store, symbols=None, *, passed_symbols=1):
+        super().__init__(store, symbols)
+        self.passed_symbols = passed_symbols
+
+    async def discover(self, run_id):
+        await super().discover(run_id)
+        run = self.store.get_run(run_id)
+        run.error_count += 1
+        run.symbols_prefiltered = self.passed_symbols
+        self.store.db.commit()
+        return run.symbols_discovered
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_partial_when_prefilter_errors_have_successful_symbols():
+    factory, _ = session_factory()
+
+    def coordinator_factory(store):
+        return ErrorCountingCoordinator(store, ["AAPL"], passed_symbols=1)
+
+    worker = MarketScanWorker(
+        session_factory=factory,
+        coordinator_factory=coordinator_factory,
+        deep_scan_factory=lambda store, db: FakeDeepScan(store),
+    )
+    run = worker.create_or_queue_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={},
+    )
+
+    await worker.run_once(run.id)
+
+    db = factory()
+    assert MarketScannerStore(db).get_run(run.id).status == "partial"
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_failed_when_discovery_errors_leave_no_survivors():
+    factory, _ = session_factory()
+
+    class NoSurvivorCoordinator(ErrorCountingCoordinator):
+        async def discover(self, run_id):
+            run = self.store.get_run(run_id)
+            run.status = "discovering"
+            run.symbols_discovered = 1
+            run.symbols_prefiltered = 0
+            run.error_count = 1
+            self.store.db.commit()
+            return 1
+
+        def next_deep_scan_symbols(self, run_id, limit):
+            return []
+
+    worker = MarketScanWorker(
+        session_factory=factory,
+        coordinator_factory=lambda store: NoSurvivorCoordinator(
+            store, [], passed_symbols=0
+        ),
+        deep_scan_factory=lambda store, db: FakeDeepScan(store),
+    )
+    run = worker.create_or_queue_run(
+        risk_capital_mode="simulation",
+        risk_equity=Decimal("750000"),
+        config_snapshot={},
+    )
+
+    await worker.run_once(run.id)
+
+    db = factory()
+    assert MarketScannerStore(db).get_run(run.id).status == "failed"
+    db.close()
