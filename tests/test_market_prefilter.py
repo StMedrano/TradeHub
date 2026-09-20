@@ -6,6 +6,7 @@ import pytest
 from app.market_scanner.prefilter import (
     EquityPrefilter,
     EquityReadSnapshot,
+    RobinhoodEquityReadProvider,
 )
 
 
@@ -190,3 +191,65 @@ async def test_high_spot_price_lowers_priority_without_rejecting():
     assert low.passed is True
     assert high.passed is True
     assert high.priority_score < low.priority_score
+
+
+
+class EtfReadClient:
+    def __init__(self):
+        self.calls = []
+        self.catalog = {
+            "get_equity_quotes": {
+                "name": "get_equity_quotes",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"symbols": {"type": "array"}},
+                    "required": ["symbols"],
+                },
+            },
+            "get_equity_fundamentals": {
+                "name": "get_equity_fundamentals",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"symbol": {"type": "string"}},
+                    "required": ["symbol"],
+                },
+            },
+            "get_equity_tradability": {
+                "name": "get_equity_tradability",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"symbol": {"type": "string"}},
+                    "required": ["symbol"],
+                },
+            },
+        }
+
+    async def tool_catalog(self):
+        return self.catalog
+
+    async def call(self, tool_name, arguments):
+        self.calls.append(tool_name)
+        if tool_name == "get_equity_quotes":
+            return {"data": [{"symbol": "ETF", "last_trade_price": "50"}]}
+        if tool_name == "get_equity_fundamentals":
+            return {
+                "data": [{
+                    "symbol": "ETF",
+                    "security_type": "ETF",
+                    "average_volume": 2_000_000,
+                    "market_cap": 5_000_000_000,
+                }]
+            }
+        if tool_name == "get_equity_tradability":
+            return {"data": [{"symbol": "ETF", "tradable": True}]}
+        raise AssertionError(f"Unexpected tool call: {tool_name}")
+
+
+@pytest.mark.asyncio
+async def test_robinhood_provider_does_not_require_earnings_tool_for_etf():
+    client = EtfReadClient()
+    snapshot = await RobinhoodEquityReadProvider(client).snapshot("ETF")
+
+    assert snapshot.is_etf is True
+    assert snapshot.next_earnings_date is None
+    assert "get_earnings_calendar" not in client.calls
