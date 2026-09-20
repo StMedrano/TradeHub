@@ -145,8 +145,43 @@ class RobinhoodScannerService:
             if str(row.get("name") or "") != name:
                 continue
             existing_id = _first_value(row, ("id", "scan_id"))
-            if existing_id:
-                return str(existing_id)
+            if not existing_id:
+                continue
+
+            scan_id = str(existing_id)
+            filter_context = {
+                "scan_id": scan_id,
+                "id": scan_id,
+                "filters": filters,
+            }
+            await self._call(
+                "update_scan_filters",
+                filter_context,
+                catalog,
+            )
+
+            if sort is not None:
+                sort_field = sort.get("field")
+                sort_direction = sort.get("direction")
+                config_context = {
+                    "scan_id": scan_id,
+                    "id": scan_id,
+                    "sort": sort,
+                    "sort_config": sort,
+                    "config": {"sort": sort},
+                    "sort_field": sort_field,
+                    "sort_by": sort_field,
+                    "field": sort_field,
+                    "direction": sort_direction,
+                    "sort_direction": sort_direction,
+                }
+                await self._call(
+                    "update_scan_config",
+                    config_context,
+                    catalog,
+                )
+
+            return scan_id
 
         created = await self._call(
             "create_scan",
