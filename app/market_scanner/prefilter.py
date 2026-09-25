@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from app.config import settings
 from app.market_scanner.types import EquityScreenResult
 from app.robinhood.client import RobinhoodTradingMCP
+from app.robinhood.read_service import get_persisted_account_number
 from app.robinhood.schema_args import build_arguments
 
 
@@ -102,9 +103,17 @@ class RobinhoodEquityReadProvider:
         tool = catalog.get(tool_name)
         if tool is None:
             raise RuntimeError(f"Robinhood MCP did not advertise {tool_name}.")
+        context: dict[str, Any] = {
+            "symbol": symbol,
+            "symbols": [symbol],
+        }
+        account_number = get_persisted_account_number()
+        if account_number:
+            context["account_number"] = account_number
+
         args = build_arguments(
             tool.get("input_schema") or {},
-            {"symbol": symbol, "symbols": [symbol]},
+            context,
         )
         return await self.client.call(tool_name, args)
 
