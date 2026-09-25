@@ -7,6 +7,7 @@ This repository is intentionally Robinhood-only. It is designed around Robinhood
 ## Safety defaults
 
 - Dry-run mode enabled by default
+- Simulation risk-capital mode enabled by default
 - Live order placement disabled until explicitly enabled
 - Manual approval required by default
 - Defined-risk strategies only; naked option selling is prohibited
@@ -30,7 +31,12 @@ No strategy module receives direct write access to Robinhood.
 git clone https://github.com/StMedrano/TradeHub.git
 cd TradeHub
 cp .env.example .env
+
+# Generate a strong database password, then paste it into POSTGRES_PASSWORD= in .env.
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 nano .env
+
+# Compose intentionally refuses to start while POSTGRES_PASSWORD is empty.
 docker compose up -d --build
 docker compose run --rm app pytest -q
 ```
