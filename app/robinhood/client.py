@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 import httpx2
@@ -15,6 +16,29 @@ from app.robinhood.normalize import mcp_result_to_data
 
 class RobinhoodAuthRequired(RuntimeError):
     pass
+
+
+def _exception_message(exc: BaseException) -> str:
+    if isinstance(exc, BaseExceptionGroup):
+        parts = [_exception_message(child) for child in exc.exceptions]
+        parts = [part for part in parts if part]
+        return " | ".join(parts) if parts else str(exc)
+    return str(exc)
+
+
+def _is_transient_mcp_error(exc: BaseException) -> bool:
+    message = _exception_message(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "sse stream ended without a response",
+            "connection reset",
+            "connection closed",
+            "server disconnected",
+            "timed out",
+            "timeout",
+        )
+    )
 
 
 async def _reauth_redirect(auth_url: str) -> None:
@@ -87,7 +111,24 @@ class RobinhoodTradingMCP:
                 return await client.list_tools()
 
     async def tool_catalog(self) -> dict[str, dict[str, Any]]:
-        result = await self.list_tools()
+        last_error: BaseException | None = None
+        result = None
+        for attempt in range(2):
+            try:
+                result = await self.list_tools()
+                break
+            except BaseException as exc:
+                last_error = exc
+                if attempt == 0 and _is_transient_mcp_error(exc):
+                    await asyncio.sleep(0.35)
+                    continue
+                raise
+
+        if result is None:
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("Robinhood tool catalog failed without an exception.")
+
         catalog: dict[str, dict[str, Any]] = {}
         for tool in result.tools:
             schema = getattr(tool, "inputSchema", None)
