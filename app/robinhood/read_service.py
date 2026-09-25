@@ -29,6 +29,11 @@ def _load_persisted_account_number() -> str | None:
     return str(value) if value else None
 
 
+def get_persisted_account_number() -> str | None:
+    """Return the persisted Robinhood Agentic account number, if available."""
+    return _load_persisted_account_number()
+
+
 def _persist_account_number(account_number: str) -> None:
     path = Path(settings.robinhood_account_store)
     path.parent.mkdir(parents=True, exist_ok=True)
