@@ -267,3 +267,38 @@ async def test_robinhood_equity_provider_reuses_tool_catalog():
     await provider.snapshot("ETF")
 
     assert client.catalog_calls == 1
+
+
+
+class AccountScopedReadClient(EtfReadClient):
+    def __init__(self):
+        super().__init__()
+        for tool in self.catalog.values():
+            props = tool["input_schema"]["properties"]
+            props["account_number"] = {"type": "string"}
+            tool["input_schema"]["required"] = list(
+                dict.fromkeys(tool["input_schema"]["required"] + ["account_number"])
+            )
+        self.arguments = []
+
+    async def call(self, tool_name, arguments):
+        self.arguments.append((tool_name, arguments))
+        return await super().call(tool_name, arguments)
+
+
+@pytest.mark.asyncio
+async def test_robinhood_provider_supplies_persisted_account_number(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_scanner.prefilter.get_persisted_account_number",
+        lambda: "AGENTIC123",
+    )
+    client = AccountScopedReadClient()
+
+    snapshot = await RobinhoodEquityReadProvider(client).snapshot("ETF")
+
+    assert snapshot.symbol == "ETF"
+    assert client.arguments
+    assert all(
+        arguments["account_number"] == "AGENTIC123"
+        for _, arguments in client.arguments
+    )
