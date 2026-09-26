@@ -19,7 +19,8 @@ def test_dashboard_does_not_render_robinhood_account_number(monkeypatch):
     )
     monkeypatch.setattr(robinhood_read_service, "snapshot", snapshot)
 
-    response = TestClient(app).get("/api/dashboard/summary")
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/summary")
 
     assert response.status_code == 200
     assert secret_account not in response.text
@@ -38,7 +39,8 @@ def test_health_does_not_render_robinhood_account_number(monkeypatch):
         ),
     )
 
-    response = TestClient(app).get("/api/health")
+    with TestClient(app) as client:
+        response = client.get("/api/health")
 
     assert response.status_code == 200
     assert secret_account not in response.text
