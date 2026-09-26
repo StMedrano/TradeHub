@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: tradehub
       POSTGRES_USER: tradehub
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - tradehub-db:/var/lib/postgresql/data
     healthcheck:
@@ -38,7 +38,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://tradehub:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/tradehub
+      DATABASE_URL: postgresql+psycopg://tradehub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/tradehub
     depends_on:
       db:
         condition: service_healthy

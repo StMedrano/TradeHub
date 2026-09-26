@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./tradehub.db"
 
     trading_mode: TradingMode = TradingMode.DRY_RUN
-    risk_capital_mode: RiskCapitalMode = RiskCapitalMode.LIVE_ACCOUNT
+    risk_capital_mode: RiskCapitalMode = RiskCapitalMode.SIMULATION
     simulation_capital: float = Field(default=10000.0, gt=0)
     phase: int = Field(default=0, ge=0, le=2)
     require_approval: bool = True
