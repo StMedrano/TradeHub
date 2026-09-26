@@ -19,6 +19,8 @@ def test_dashboard_does_not_render_robinhood_account_number(monkeypatch):
     )
     monkeypatch.setattr(robinhood_read_service, "snapshot", snapshot)
 
+    # The dashboard depends on startup-created database tables, so exercise it
+    # inside the application lifespan.
     with TestClient(app) as client:
         response = client.get("/api/dashboard/summary")
 
@@ -39,8 +41,12 @@ def test_health_does_not_render_robinhood_account_number(monkeypatch):
         ),
     )
 
-    with TestClient(app) as client:
-        response = client.get("/api/health")
+    # Health is database-independent. Do not start a second application
+    # lifespan here: the singleton Robinhood read service owns asyncio
+    # primitives created by the first lifespan and must not be rebound to a
+    # second TestClient event loop.
+    client = TestClient(app)
+    response = client.get("/api/health")
 
     assert response.status_code == 200
     assert secret_account not in response.text
