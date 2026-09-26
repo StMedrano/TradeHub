@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -57,4 +57,14 @@ def dashboard():
 
 @app.get("/ready")
 def ready():
-    return {"ready": True}
+    if not settings.robinhood_mcp_enabled:
+        return {"ready": True, "robinhood": "disabled"}
+
+    state = robinhood_read_service.snapshot.connection_state
+    if state == "connected":
+        return {"ready": True, "robinhood": "connected"}
+
+    raise HTTPException(
+        status_code=503,
+        detail={"ready": False, "robinhood": state},
+    )
