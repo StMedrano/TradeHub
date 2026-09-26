@@ -49,31 +49,33 @@ http://SERVER_IP:8787
 
 Keep the dashboard on a trusted management path or authenticated reverse proxy. Do not expose it directly to the public Internet.
 
+For clean-clone deployment, upgrades, persistent-volume handling, backup/restore, and release smoke tests, see [Production operations](docs/OPERATIONS.md).
+
 ## Current rebuild milestone
 
 Implemented:
 
-- FastAPI dashboard/API
-- Postgres persistence
-- Manual approval queue
-- Browser approval notifications
-- Configurable risk manager
-- Daily circuit-breaker logic
+- FastAPI dashboard/API and React 19 + Vite + Radix Themes frontend
+- Postgres persistence with interrupted scanner-run recovery
+- Market scanner discovery/prefilter/deep-scan pipeline and persisted scanner history
+- Robinhood Trading MCP account-scoped read boundary
+- Retry handling for transient MCP/SSE tool-catalog failures
+- Robinhood-aware readiness health reporting
+- Manual approval queue and browser approval notifications
+- Configurable risk manager and daily circuit-breaker logic
 - Underlying pause/acknowledgement for assignment or expiration risk
-- Dry-run/live execution gate
+- Dry-run/live execution gate with simulation risk-capital default
 - Mid-price and bounded price-walk helpers
 - Multi-leg sequencing state model
 - Audit events
-- Robinhood Trading MCP client boundary
-- Docker/Compose deployment
-- GitHub Actions tests
+- Docker/Compose deployment with persistent Postgres and Robinhood auth-state volumes
+- GitHub Actions frontend tests/build and backend tests
+
+Production-completion work is tracked in GitHub issue #4. Remaining verification includes full-scan/deep-scan failure isolation, scanner UI state coverage and browser secret checks, clean-clone deployment validation, restore rehearsal, and final smoke/CI verification.
 
 Live order placement remains disabled by default.
 
 ## Dashboard UI
-
-TradeHub now ships a React 19 + Vite + Radix Themes frontend that is compiled into
-the production Docker image and served by FastAPI.
 
 The dashboard includes:
 
@@ -90,27 +92,26 @@ The dashboard includes:
 - Robinhood MCP / rollout mode status
 - Responsive tablet/mobile layout
 
-When Robinhood MCP read access is disabled, brokerage account-value fields display
-as unavailable instead of using fake production data.
+When Robinhood MCP read access is disabled, brokerage account-value fields display as unavailable instead of using fake production data.
 
-To apply UI updates on an existing server:
+To apply UI updates on an existing server, follow the upgrade procedure in [Production operations](docs/OPERATIONS.md). The short form is:
 
 ```bash
 cd /opt/TradeHub
-git pull
-docker compose up -d --build
+git pull --ff-only
+docker compose build --pull
+docker compose up -d --remove-orphans
 ```
-
 
 ## Robinhood authentication
 
-TradeHub uses Robinhood's official Trading MCP OAuth flow. OAuth state is stored
-inside the Docker volume `tradehub-secrets`; it is not stored in Git.
+TradeHub uses Robinhood's official Trading MCP OAuth flow. OAuth state is stored inside the Docker volume `tradehub-secrets`; it is not stored in Git. Back up and restore that state as sensitive credential material using [Production operations](docs/OPERATIONS.md).
 
 Keep TradeHub in dry-run while connecting:
 
 ```env
 TRADING_MODE=dry_run
+RISK_CAPITAL_MODE=simulation
 PHASE=0
 ROBINHOOD_MCP_ENABLED=false
 ```
@@ -122,15 +123,14 @@ cd /opt/TradeHub
 docker compose run --rm -it app python -m app.robinhood.auth_cli
 ```
 
-The command prints a Robinhood authorization URL. Open it on a desktop browser,
-complete Robinhood authorization, then copy the full localhost callback URL from
-the browser address bar and paste it back into the terminal.
+The command prints a Robinhood authorization URL. Open it on a desktop browser, complete Robinhood authorization, then copy the full localhost callback URL from the browser address bar and paste it back into the terminal.
 
 After the command reports success, edit `.env`:
 
 ```env
 ROBINHOOD_MCP_ENABLED=true
 TRADING_MODE=dry_run
+RISK_CAPITAL_MODE=simulation
 PHASE=0
 ```
 
@@ -145,23 +145,17 @@ Verify the read-only connection:
 
 ```bash
 curl http://localhost:8787/api/robinhood/status
+curl http://localhost:8787/ready
 curl -X POST http://localhost:8787/api/robinhood/sync
 ```
 
-The background synchronizer only invokes Robinhood read tools. It does not call
-`review_option_order`, `place_option_order`, or `cancel_option_order`.
+The background synchronizer only invokes Robinhood read tools. It does not call `review_option_order`, `place_option_order`, or `cancel_option_order`.
 
-### Read-sync data currently used by the dashboard
+### Read-sync data used by the dashboard
 
-- Robinhood account discovery
-- Agentic account identification
-- Portfolio total value
-- Buying power
-- Cash
-- Options value
-- Open equity position count
-- Open option position count
-- Open option order count
+- Robinhood account discovery and Agentic account identification
+- Portfolio total value, buying power, cash, and options value
+- Open equity/option position counts and open option order count
+- Scanner equity/fundamental/tradability reads and option/deep-scan inputs when the corresponding Robinhood MCP tools are available
 
-P&L, full position detail, chains, quotes, Greeks, IV rank, and strategy scanning
-are the next read-only milestones.
+TradeHub remains safety-gated: live execution is not part of the production-completion milestone and must not be enabled merely because deployment/readiness checks pass.
