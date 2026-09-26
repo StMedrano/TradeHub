@@ -12,6 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate Docker Compose from clean checkout
+        env:
+          POSTGRES_PASSWORD: ci-compose-validation-only
+        run: docker compose config --quiet
+
+      - name: Build production app image from clean checkout
+        env:
+          POSTGRES_PASSWORD: ci-compose-validation-only
+        run: docker compose build app
+
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
