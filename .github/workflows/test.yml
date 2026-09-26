@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Prepare ephemeral Compose environment
+        env:
+          POSTGRES_PASSWORD: ci-compose-validation-only
+        run: printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD" > .env
+
       - name: Validate Docker Compose from clean checkout
         env:
           POSTGRES_PASSWORD: ci-compose-validation-only
